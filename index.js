@@ -40,28 +40,56 @@ client.on('guildMemberRemove', async (member) => {
         // Wait a moment for audit log to update (Discord has a slight delay)
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Fetch recent audit logs for kicks
-        const auditLogs = await guild.fetchAuditLogs({
-            type: AuditLogEvent.MemberKick,
-            limit: 5
-        });
+        // Fetch recent audit logs for both kicks and bans
+        const [kickLogs, banLogs] = await Promise.all([
+            guild.fetchAuditLogs({
+                type: AuditLogEvent.MemberKick,
+                limit: 5
+            }),
+            guild.fetchAuditLogs({
+                type: AuditLogEvent.MemberBanAdd,
+                limit: 5
+            })
+        ]);
 
         // Find the kick entry that matches this member
-        const kickEntry = auditLogs.entries.find(entry => 
+        const kickEntry = kickLogs.entries.find(entry => 
             entry.target.id === member.id &&
             Date.now() - entry.createdTimestamp < 5000 // Within last 5 seconds
         );
 
-        // If no kick entry found, member likely left voluntarily
-        if (!kickEntry) {
-            console.log(`👋 ${member.user.tag} left ${guild.name} (not kicked)`);
+        // Find the ban entry that matches this member
+        const banEntry = banLogs.entries.find(entry => 
+            entry.target.id === member.id &&
+            Date.now() - entry.createdTimestamp < 5000 // Within last 5 seconds
+        );
+
+        // Determine the action type
+        let actionType = 'left'; // Default to voluntary leave
+        let auditEntry = null;
+
+        if (kickEntry && banEntry) {
+            // Both exist, use the most recent one
+            auditEntry = kickEntry.createdTimestamp > banEntry.createdTimestamp ? kickEntry : banEntry;
+            actionType = auditEntry === kickEntry ? 'kicked' : 'banned';
+        } else if (kickEntry) {
+            auditEntry = kickEntry;
+            actionType = 'kicked';
+        } else if (banEntry) {
+            auditEntry = banEntry;
+            actionType = 'banned';
+        }
+
+        // If no kick or ban entry found, member left voluntarily
+        if (!auditEntry) {
+            console.log(`👋 ${member.user.tag} left ${guild.name} voluntarily (not kicked or banned)`);
             return;
         }
 
         // Extract executor information
-        const executor = kickEntry.executor;
-        const kickedUser = member.user;
-        const timestamp = new Date(kickEntry.createdTimestamp);
+        const executor = auditEntry.executor;
+        const removedUser = member.user;
+        const timestamp = new Date(auditEntry.createdTimestamp);
         
         // Determine if executor is a bot
         const isBot = executor.bot;
@@ -69,11 +97,14 @@ client.on('guildMemberRemove', async (member) => {
             executor.username.toLowerCase().includes(botName.toLowerCase())
         );
 
-        // Build DM message
-        let dmMessage = `🚨 **Member Kicked from ${guild.name}**\n\n`;
-        dmMessage += `**Kicked Member:**\n`;
-        dmMessage += `• Username: ${kickedUser.tag}\n`;
-        dmMessage += `• User ID: ${kickedUser.id}\n\n`;
+        // Build DM message with appropriate action type
+        const actionEmoji = actionType === 'kicked' ? '🚨' : '🔨';
+        const actionText = actionType === 'kicked' ? 'Kicked' : 'Banned';
+        
+        let dmMessage = `${actionEmoji} **Member ${actionText} from ${guild.name}**\n\n`;
+        dmMessage += `**${actionText} Member:**\n`;
+        dmMessage += `• Username: ${removedUser.tag}\n`;
+        dmMessage += `• User ID: ${removedUser.id}\n\n`;
         
         if (isBot) {
             dmMessage += `**Executor (Bot):**\n`;
@@ -82,7 +113,8 @@ client.on('guildMemberRemove', async (member) => {
             
             if (isModerationBot) {
                 dmMessage += `• Type: Moderation Bot\n`;
-                dmMessage += `\n⚠️ *This kick was executed by a moderation bot. The actual moderator who triggered this action may not be logged in audit logs.*\n`;
+                const actionNoun = actionType === 'kicked' ? 'kick' : 'ban';
+                dmMessage += `\n⚠️ *This ${actionNoun} was executed by a moderation bot. The actual moderator who triggered this action may not be logged in audit logs.*\n`;
             }
         } else {
             dmMessage += `**Executor (Human):**\n`;
@@ -97,10 +129,10 @@ client.on('guildMemberRemove', async (member) => {
         })}\n`;
         dmMessage += `• Unix: ${Math.floor(timestamp.getTime() / 1000)}\n`;
 
-        // Optional: Attempt to find human behind bot kick by checking recent messages
+        // Optional: Attempt to find human behind bot kick/ban by checking recent messages
         if (isModerationBot) {
             try {
-                const humanBehindBot = await findHumanBehindBotKick(guild, executor, kickedUser, timestamp);
+                const humanBehindBot = await findHumanBehindBotKick(guild, executor, removedUser, timestamp);
                 if (humanBehindBot) {
                     dmMessage += `\n**Possible Human Moderator:**\n`;
                     dmMessage += `• ${humanBehindBot.tag} (${humanBehindBot.id})\n`;
@@ -115,7 +147,7 @@ client.on('guildMemberRemove', async (member) => {
         try {
             const targetUser = await client.users.fetch(YOUR_USER_ID);
             await targetUser.send(dmMessage);
-            console.log(`✅ Kick notification sent for ${kickedUser.tag}`);
+            console.log(`✅ ${actionText} notification sent for ${removedUser.tag}`);
         } catch (dmError) {
             console.error(`❌ Failed to send DM: ${dmError.message}`);
             if (dmError.code === 50007) {
@@ -136,36 +168,37 @@ client.on('guildMemberRemove', async (member) => {
 });
 
 /**
- * Best-effort attempt to find the human moderator behind a bot kick
+ * Best-effort attempt to find the human moderator behind a bot kick or ban
  * This searches recent messages from the moderation bot for moderator mentions
- * @param {Guild} guild - The guild where kick occurred
- * @param {User} botExecutor - The bot that executed the kick
- * @param {User} kickedUser - The user who was kicked
- * @param {Date} kickTimestamp - When the kick occurred
+ * @param {Guild} guild - The guild where kick/ban occurred
+ * @param {User} botExecutor - The bot that executed the kick/ban
+ * @param {User} removedUser - The user who was kicked/banned
+ * @param {Date} actionTimestamp - When the kick/ban occurred
  * @returns {Promise<User|null>} - The suspected human moderator or null
  */
-async function findHumanBehindBotKick(guild, botExecutor, kickedUser, kickTimestamp) {
+async function findHumanBehindBotKick(guild, botExecutor, removedUser, actionTimestamp) {
     try {
         // Get all text channels
         const channels = guild.channels.cache.filter(c => c.isTextBased());
         
-        // Search for recent bot messages (within 10 seconds of kick)
+        // Search for recent bot messages (within 10 seconds of kick/ban)
         for (const [, channel] of channels) {
             try {
                 const messages = await channel.messages.fetch({ limit: 10 });
                 
                 const relevantMessage = messages.find(msg => 
                     msg.author.id === botExecutor.id &&
-                    Math.abs(msg.createdTimestamp - kickTimestamp.getTime()) < 10000 &&
-                    (msg.content.includes(kickedUser.tag) || 
-                     msg.content.includes(kickedUser.id) ||
-                     msg.content.toLowerCase().includes('kicked'))
+                    Math.abs(msg.createdTimestamp - actionTimestamp.getTime()) < 10000 &&
+                    (msg.content.includes(removedUser.tag) || 
+                     msg.content.includes(removedUser.id) ||
+                     msg.content.toLowerCase().includes('kicked') ||
+                     msg.content.toLowerCase().includes('banned'))
                 );
                 
                 if (relevantMessage) {
-                    // Try to find mentioned users (excluding the kicked user)
+                    // Try to find mentioned users (excluding the removed user)
                     const mentions = relevantMessage.mentions.users.filter(u => 
-                        u.id !== kickedUser.id && u.id !== botExecutor.id
+                        u.id !== removedUser.id && u.id !== botExecutor.id
                     );
                     
                     if (mentions.size > 0) {

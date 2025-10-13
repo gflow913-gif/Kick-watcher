@@ -1,17 +1,18 @@
-# Discord Kick Monitor Bot
+# Discord Kick & Ban Monitor Bot
 
-A Discord bot that monitors member kicks and sends detailed DM notifications with executor information, timestamps, and bot detection.
+A Discord bot that monitors member kicks and bans, sending detailed DM notifications with executor information, timestamps, and bot detection.
 
 ## Features
 
-- ✅ Detects when members are kicked from Discord servers
-- ✅ Identifies whether kicks were performed by humans or bots
+- ✅ Detects when members are kicked or banned from Discord servers
+- ✅ Identifies whether kicks/bans were performed by humans or bots
 - ✅ Sends detailed DM notifications with:
-  - Kicked member's username & ID
+  - Kicked/banned member's username & ID
   - Executor (human or bot) username & ID
-  - Timestamp of the kick (formatted and Unix)
+  - Timestamp of the action (formatted and Unix)
+  - Action type (kick vs ban)
 - ✅ Special handling for moderation bots (Arcane, MEE6, Dyno, etc.)
-- ✅ Best-effort detection of humans behind bot kicks
+- ✅ Best-effort detection of humans behind bot kicks/bans
 - ✅ Comprehensive error handling for permissions and audit log delays
 - ✅ Distinguishes between kicks, bans, and voluntary leaves
 
@@ -87,14 +88,15 @@ To run this bot 24/7 on Pella or any other hosting service:
 ## How It Works
 
 1. **Event Listener**: Bot listens for `guildMemberRemove` events
-2. **Audit Log Check**: Fetches recent audit logs to find kick entries
-3. **Executor Detection**: Determines if kick was by human or bot
-4. **DM Notification**: Sends formatted message to your Discord DMs
-5. **Error Handling**: Gracefully handles permission errors and API delays
+2. **Audit Log Check**: Fetches recent audit logs to find kick and ban entries
+3. **Action Detection**: Determines if member was kicked, banned, or left voluntarily
+4. **Executor Detection**: Determines if action was by human or bot
+5. **DM Notification**: Sends formatted message to your Discord DMs
+6. **Error Handling**: Gracefully handles permission errors and API delays
 
 ## Troubleshooting
 
-### Bot doesn't detect kicks
+### Bot doesn't detect kicks or bans
 - Ensure "SERVER MEMBERS INTENT" is enabled in Discord Developer Portal
 - Verify bot has "View Audit Log" permission in your server
 - Check that bot role is high enough in the role hierarchy
