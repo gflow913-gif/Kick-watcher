@@ -164,11 +164,6 @@ client.on('guildMemberRemove', async (member) => {
         } else if (error.code === 50001) {
             console.error(`   → Missing access. Ensure bot has proper role permissions`);
         }
-    }
-});
-
-/**
- * Best-effort attempt to find the human moderator behind a bot kick or ban
  * This searches recent messages from the moderation bot for moderator mentions
  * @param {Guild} guild - The guild where kick/ban occurred
  * @param {User} botExecutor - The bot that executed the kick/ban
