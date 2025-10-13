@@ -1,6 +1,6 @@
 # Overview
 
-This is a Discord bot application that monitors and reports member removals (kicks and bans) from Discord servers. The bot detects when members are removed, determines whether the action was performed by a human or bot moderator, and sends detailed DM notifications to a configured user. It uses the Discord.js v14 library and implements audit log analysis to distinguish between kicks, bans, and voluntary departures.
+This is a comprehensive Discord moderation monitoring bot that tracks all moderation actions including kicks, bans, unbans, timeouts/mutes, and unmutes. The bot uses real-time event listeners and audit log analysis to detect moderation actions, identify executors (human or bot), and send detailed DM notifications to a configured user. Built with Discord.js v14, it provides complete moderation oversight with best-effort detection of human moderators behind bot actions.
 
 # User Preferences
 
@@ -14,19 +14,30 @@ Single-file Node.js application using Discord.js v14 as the primary framework fo
 ## Core Components
 
 ### Discord Client Configuration
-- **Gateway Intents**: Uses minimal required intents (Guilds, GuildMembers, GuildMessages, MessageContent) to reduce overhead and comply with Discord's privileged intent requirements
-- **Event-Driven Architecture**: Implements Discord.js event listeners for bot lifecycle and member removal detection
-- **Rationale**: Event-driven approach aligns with Discord's WebSocket-based real-time communication model
+- **Gateway Intents**: Uses required intents for comprehensive moderation monitoring:
+  - Guilds - Access to guild information
+  - GuildMembers - Required to detect member removals and updates
+  - GuildModeration - Required for ban events (guildBanAdd, guildBanRemove)
+  - GuildMessages - For bot message parsing
+  - MessageContent - For best-effort human moderator detection from bot messages
+- **Event-Driven Architecture**: Implements Discord.js event listeners for bot lifecycle and all moderation events
+- **Rationale**: Event-driven approach aligns with Discord's WebSocket-based real-time communication model and ensures instant notification delivery
 
 ### Event Handling System
-- **Primary Event**: `guildMemberRemove` - Triggered when any member leaves, is kicked, or is banned
-- **Audit Log Analysis**: Fetches both kick and ban audit logs simultaneously using Promise.all for performance
-- **Delay Handling**: Implements 1-second delay before audit log fetch to account for Discord API propagation delays
-- **Rationale**: Discord's audit logs aren't immediately available after actions occur; the delay ensures accurate detection
+- **Multi-Event Architecture**: Monitors 4 Discord events for comprehensive moderation tracking:
+  - `guildMemberRemove` - Detects kicks and member departures
+  - `guildBanAdd` - Real-time ban detection with reason tracking
+  - `guildBanRemove` - Unban monitoring
+  - `guildMemberUpdate` - Timeout/mute and unmute detection via communication_disabled_until changes
+- **Audit Log Analysis**: Fetches multiple audit log types (MemberKick, MemberBanAdd, MemberBanRemove, MemberUpdate) using Promise.all for performance
+- **Delay Handling**: Implements 500ms-1000ms delays before audit log fetch to account for Discord API propagation delays
+- **Timeout Detection**: Monitors communicationDisabledUntil field changes in guildMemberUpdate events to detect mutes/unmutes with duration tracking
+- **Rationale**: Real-time event listeners provide immediate detection while audit logs supply executor information; multiple event types ensure comprehensive coverage of all moderation actions
 
 ### Bot vs Human Detection
-- **Known Bot Database**: Maintains hardcoded array of common moderation bots (Arcane, MEE6, Dyno, Carl-bot, ProBot, Wick)
+- **Known Bot Database**: Maintains hardcoded array of common moderation bots (Arcane, MEE6, Dyno, Carl-bot, ProBot, Wick, Maki, YAGPDB)
 - **Audit Log Parsing**: Analyzes executor information from Discord audit logs to identify who performed the action
+- **Best-Effort Human Detection**: Searches recent bot messages for mentions/patterns to identify the human moderator behind bot actions
 - **Rationale**: While not perfect, this approach provides best-effort attribution for moderation actions, especially useful in servers with bot-assisted moderation
 
 ### Permission Handling
@@ -46,10 +57,22 @@ Single-file Node.js application using Discord.js v14 as the primary framework fo
 - **Rationale**: Ensures high availability - one server's permission issues don't affect monitoring in other servers
 
 ## Notification System
-- **Direct Messages**: Sends detailed notifications via DM to configured user ID
-- **Timestamp Formatting**: Provides both human-readable and Unix timestamp formats
-- **Action Differentiation**: Clearly distinguishes between kicks, bans, and voluntary leaves
-- **Rationale**: DMs ensure reliable delivery to the monitoring user regardless of server notification settings
+- **Direct Messages**: Sends detailed notifications via DM to configured user ID for all moderation actions
+- **Action-Specific Formatting**: Different emojis and formatting for each action type:
+  - 🚨 Kicks
+  - 🔨 Bans
+  - ✅ Unbans
+  - 🔇 Timeouts/Mutes
+  - 🔊 Unmutes
+- **Comprehensive Details**: Each notification includes:
+  - Target member username & ID
+  - Executor username & ID (human or bot)
+  - Action timestamp (formatted and Unix)
+  - Ban reasons (when available)
+  - Timeout duration and expiration (for mutes)
+  - Best-effort human moderator detection for bot actions
+- **Helper Functions**: Centralized sendDM() function for DRY code and consistent error handling
+- **Rationale**: Action-specific formatting improves readability; DMs ensure reliable delivery regardless of server notification settings
 
 # External Dependencies
 

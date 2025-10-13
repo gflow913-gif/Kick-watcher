@@ -1,20 +1,31 @@
-# Discord Kick & Ban Monitor Bot
+# Discord Moderation Monitor Bot
 
-A Discord bot that monitors member kicks and bans, sending detailed DM notifications with executor information, timestamps, and bot detection.
+A comprehensive Discord bot that monitors all moderation actions (kicks, bans, unbans, timeouts/mutes) and sends detailed DM notifications with executor information, timestamps, and bot detection.
 
 ## Features
 
-- ✅ Detects when members are kicked or banned from Discord servers
-- ✅ Identifies whether kicks/bans were performed by humans or bots
-- ✅ Sends detailed DM notifications with:
-  - Kicked/banned member's username & ID
-  - Executor (human or bot) username & ID
-  - Timestamp of the action (formatted and Unix)
-  - Action type (kick vs ban)
-- ✅ Special handling for moderation bots (Arcane, MEE6, Dyno, etc.)
-- ✅ Best-effort detection of humans behind bot kicks/bans
-- ✅ Comprehensive error handling for permissions and audit log delays
-- ✅ Distinguishes between kicks, bans, and voluntary leaves
+### Complete Moderation Tracking
+- ✅ **Kicks** - Detects when members are kicked from servers
+- ✅ **Bans** - Monitors member bans with reason tracking
+- ✅ **Unbans** - Tracks when members are unbanned
+- ✅ **Timeouts/Mutes** - Detects when members are timed out with duration tracking
+- ✅ **Unmutes** - Monitors when timeouts are removed
+- ✅ **Voluntary Leaves** - Distinguishes kicks from voluntary departures
+
+### Advanced Detection
+- ✅ Identifies whether actions were performed by humans or bots
+- ✅ Special handling for moderation bots (Arcane, MEE6, Dyno, Carl-bot, ProBot, Wick, Maki, YAGPDB)
+- ✅ Best-effort detection of humans behind bot actions
+- ✅ Real-time event monitoring for instant notifications
+
+### Detailed Notifications
+- ✅ Target member's username & ID
+- ✅ Executor (human or bot) username & ID
+- ✅ Action type with appropriate emojis
+- ✅ Timestamps (formatted and Unix)
+- ✅ Ban reasons (when available)
+- ✅ Timeout duration and expiration time
+- ✅ Comprehensive error handling
 
 ## Requirements
 
@@ -87,19 +98,38 @@ To run this bot 24/7 on Pella or any other hosting service:
 
 ## How It Works
 
-1. **Event Listener**: Bot listens for `guildMemberRemove` events
-2. **Audit Log Check**: Fetches recent audit logs to find kick and ban entries
-3. **Action Detection**: Determines if member was kicked, banned, or left voluntarily
-4. **Executor Detection**: Determines if action was by human or bot
-5. **DM Notification**: Sends formatted message to your Discord DMs
-6. **Error Handling**: Gracefully handles permission errors and API delays
+1. **Event Listeners**: Bot monitors multiple Discord events:
+   - `guildMemberRemove` - Detects kicks and member departures
+   - `guildBanAdd` - Real-time ban detection with reason tracking
+   - `guildBanRemove` - Tracks unbans
+   - `guildMemberUpdate` - Detects timeouts/mutes and unmutes
+
+2. **Audit Log Analysis**: Fetches recent audit logs to identify:
+   - Kick entries (MemberKick)
+   - Ban entries (MemberBanAdd)
+   - Unban entries (MemberBanRemove)
+   - Timeout entries (MemberUpdate)
+
+3. **Action Detection**: Determines exact action type and distinguishes voluntary leaves from moderation actions
+
+4. **Executor Detection**: Identifies who performed the action (human or bot) and attempts to find the human moderator behind bot actions
+
+5. **DM Notification**: Sends comprehensive formatted messages to your Discord DMs with all relevant details
+
+6. **Error Handling**: Gracefully handles permission errors, API delays, and DM delivery failures
 
 ## Troubleshooting
 
-### Bot doesn't detect kicks or bans
+### Bot doesn't detect moderation actions
 - Ensure "SERVER MEMBERS INTENT" is enabled in Discord Developer Portal
 - Verify bot has "View Audit Log" permission in your server
 - Check that bot role is high enough in the role hierarchy
+- For timeout detection, ensure the bot can see member updates
+
+### Missing timeout/mute notifications
+- Timeouts are detected via member updates, which may have slight delays
+- Ensure bot has proper permissions to view member information
+- The bot needs to be online when the action occurs for real-time detection
 
 ### Not receiving DMs
 - Make sure `YOUR_USER_ID` is correct in `.env`
@@ -127,6 +157,8 @@ The bot recognizes these moderation bots by default:
 - Carl-bot
 - ProBot
 - Wick
+- Maki
+- YAGPDB
 
 Add more in `index.js` by editing the `KNOWN_MOD_BOTS` array.
 
