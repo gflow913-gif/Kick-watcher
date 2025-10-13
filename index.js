@@ -29,7 +29,7 @@ client.once('ready', () => {
 client.on('guildMemberRemove', async (member) => {
     try {
         const guild = member.guild;
-        
+
         // Check if bot has VIEW_AUDIT_LOG permission
         const botMember = await guild.members.fetchMe();
         if (!botMember.permissions.has(PermissionFlagsBits.ViewAuditLog)) {
@@ -90,7 +90,7 @@ client.on('guildMemberRemove', async (member) => {
         const executor = auditEntry.executor;
         const removedUser = member.user;
         const timestamp = new Date(auditEntry.createdTimestamp);
-        
+
         // Determine if executor is a bot
         const isBot = executor.bot;
         const isModerationBot = isBot && KNOWN_MOD_BOTS.some(botName => 
@@ -100,17 +100,17 @@ client.on('guildMemberRemove', async (member) => {
         // Build DM message with appropriate action type
         const actionEmoji = actionType === 'kicked' ? '🚨' : '🔨';
         const actionText = actionType === 'kicked' ? 'Kicked' : 'Banned';
-        
+
         let dmMessage = `${actionEmoji} **Member ${actionText} from ${guild.name}**\n\n`;
         dmMessage += `**${actionText} Member:**\n`;
         dmMessage += `• Username: ${removedUser.tag}\n`;
         dmMessage += `• User ID: ${removedUser.id}\n\n`;
-        
+
         if (isBot) {
             dmMessage += `**Executor (Bot):**\n`;
             dmMessage += `• Bot Name: ${executor.tag}\n`;
             dmMessage += `• Bot ID: ${executor.id}\n`;
-            
+
             if (isModerationBot) {
                 dmMessage += `• Type: Moderation Bot\n`;
                 const actionNoun = actionType === 'kicked' ? 'kick' : 'ban';
@@ -121,7 +121,7 @@ client.on('guildMemberRemove', async (member) => {
             dmMessage += `• Username: ${executor.tag}\n`;
             dmMessage += `• User ID: ${executor.id}\n`;
         }
-        
+
         dmMessage += `\n**Timestamp:**\n`;
         dmMessage += `• ${timestamp.toLocaleString('en-US', { 
             dateStyle: 'full', 
@@ -157,13 +157,16 @@ client.on('guildMemberRemove', async (member) => {
 
     } catch (error) {
         console.error(`❌ Error processing member removal:`, error);
-        
+
         // Specific error handling
         if (error.code === 50013) {
             console.error(`   → Missing permissions. Ensure bot has VIEW_AUDIT_LOG permission`);
         } else if (error.code === 50001) {
             console.error(`   → Missing access. Ensure bot has proper role permissions`);
         }
+    }
+}
+/**
  * This searches recent messages from the moderation bot for moderator mentions
  * @param {Guild} guild - The guild where kick/ban occurred
  * @param {User} botExecutor - The bot that executed the kick/ban
@@ -175,12 +178,12 @@ async function findHumanBehindBotKick(guild, botExecutor, removedUser, actionTim
     try {
         // Get all text channels
         const channels = guild.channels.cache.filter(c => c.isTextBased());
-        
+
         // Search for recent bot messages (within 10 seconds of kick/ban)
         for (const [, channel] of channels) {
             try {
                 const messages = await channel.messages.fetch({ limit: 10 });
-                
+
                 const relevantMessage = messages.find(msg => 
                     msg.author.id === botExecutor.id &&
                     Math.abs(msg.createdTimestamp - actionTimestamp.getTime()) < 10000 &&
@@ -189,17 +192,17 @@ async function findHumanBehindBotKick(guild, botExecutor, removedUser, actionTim
                      msg.content.toLowerCase().includes('kicked') ||
                      msg.content.toLowerCase().includes('banned'))
                 );
-                
+
                 if (relevantMessage) {
                     // Try to find mentioned users (excluding the removed user)
                     const mentions = relevantMessage.mentions.users.filter(u => 
                         u.id !== removedUser.id && u.id !== botExecutor.id
                     );
-                    
+
                     if (mentions.size > 0) {
                         return mentions.first();
                     }
-                    
+
                     // Try to parse moderator from message content patterns
                     const modMatch = relevantMessage.content.match(/(?:by|from)\s+<?@?!?(\d{17,19})>?/i);
                     if (modMatch) {
@@ -214,7 +217,7 @@ async function findHumanBehindBotKick(guild, botExecutor, removedUser, actionTim
     } catch (error) {
         console.log(`Could not search for human moderator: ${error.message}`);
     }
-    
+
     return null;
 }
 
