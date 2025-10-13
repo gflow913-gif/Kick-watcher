@@ -25,6 +25,20 @@ client.once('ready', () => {
     console.log(`📬 DMs will be sent to user ID: ${YOUR_USER_ID}`);
 });
 
+// Ping command to check if bot is working
+client.on('messageCreate', async (message) => {
+    // Ignore messages from bots
+    if (message.author.bot) return;
+
+    // Check for ping command
+    if (message.content.toLowerCase() === '!ping') {
+        const latency = Date.now() - message.createdTimestamp;
+        const apiLatency = Math.round(client.ws.ping);
+        
+        await message.reply(`🏓 Pong!\n📡 Message Latency: ${latency}ms\n🌐 API Latency: ${apiLatency}ms`);
+    }
+});
+
 // Listen for member removals (kicks, leaves, bans)
 client.on('guildMemberRemove', async (member) => {
     try {
@@ -165,7 +179,8 @@ client.on('guildMemberRemove', async (member) => {
             console.error(`   → Missing access. Ensure bot has proper role permissions`);
         }
     }
-}
+});
+
 /**
  * This searches recent messages from the moderation bot for moderator mentions
  * @param {Guild} guild - The guild where kick/ban occurred
