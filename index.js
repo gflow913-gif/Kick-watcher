@@ -57,6 +57,22 @@ function setDMRecipient(guildId, userId) {
     return saveConfig(config);
 }
 
+// Get custom invite message for a guild
+function getInviteMessage(guildId) {
+    const config = loadConfig();
+    return config[guildId]?.inviteMessage || null;
+}
+
+// Set custom invite message for a guild
+function setInviteMessage(guildId, message) {
+    const config = loadConfig();
+    if (!config[guildId]) {
+        config[guildId] = {};
+    }
+    config[guildId].inviteMessage = message;
+    return saveConfig(config);
+}
+
 // Configuration - Replace these with your actual values
 const YOUR_USER_ID = process.env.YOUR_USER_ID || 'YOUR_USER_ID_HERE';
 const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
@@ -127,10 +143,10 @@ client.on('messageCreate', async (message) => {
                 return;
             }
 
-            // Check if user has administrator permission
+            // Check if user has administrator permission or is server owner
             const member = await guild.members.fetch(message.author.id);
-            if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
-                await message.reply('❌ You need Administrator permission to use this command!');
+            if (!member.permissions.has(PermissionFlagsBits.Administrator) && guild.ownerId !== message.author.id) {
+                await message.reply('❌ You need Administrator permission or be the server owner to use this command!');
                 return;
             }
 
@@ -158,6 +174,49 @@ client.on('messageCreate', async (message) => {
             }
         } catch (error) {
             console.error('Error in !setdm command:', error);
+            await message.reply('❌ An error occurred while processing the command.');
+        }
+        return;
+    }
+
+    // Check for !setmessage command (available to server admins/owner)
+    if (message.content.toLowerCase().startsWith('!setmessage')) {
+        try {
+            const guild = message.guild;
+            if (!guild) {
+                await message.reply('❌ This command must be used in a server!');
+                return;
+            }
+
+            // Check if user has administrator permission or is server owner
+            const member = await guild.members.fetch(message.author.id);
+            if (!member.permissions.has(PermissionFlagsBits.Administrator) && guild.ownerId !== message.author.id) {
+                await message.reply('❌ You need Administrator permission or be the server owner to use this command!');
+                return;
+            }
+
+            // Extract message after command
+            const messageContent = message.content.substring('!setmessage'.length).trim();
+            
+            if (!messageContent) {
+                await message.reply('❌ Usage: `!setmessage <your custom message>`\n\n' +
+                    'Example: `!setmessage Hey {user}! We miss you in {server}! Come back: {invite}`\n\n' +
+                    'Available placeholders:\n' +
+                    '• `{user}` - Member\'s username\n' +
+                    '• `{server}` - Server name\n' +
+                    '• `{invite}` - Server invite link');
+                return;
+            }
+
+            // Save configuration
+            if (setInviteMessage(guild.id, messageContent)) {
+                await message.reply(`✅ Custom invite message for **${guild.name}** has been set!\n\n**Preview:**\n${messageContent.replace('{user}', 'ExampleUser').replace('{server}', guild.name).replace('{invite}', 'https://discord.gg/example')}`);
+                console.log(`✅ ${message.author.tag} configured invite message for ${guild.name}`);
+            } else {
+                await message.reply('❌ Failed to save configuration. Please try again.');
+            }
+        } catch (error) {
+            console.error('Error in !setmessage command:', error);
             await message.reply('❌ An error occurred while processing the command.');
         }
         return;
@@ -292,21 +351,35 @@ client.on('guildMemberRemove', async (member) => {
 
             // Send a welcome-back message to the user who left
             try {
-                let comeBackMessage = `👋 Hey ${member.user.tag}!\n\n` +
-                    `We noticed you left **${guild.name}**. You're precious to us and we'd love to have you back! 💝\n\n` +
-                    `If you have any problems or concerns, please don't hesitate to contact me. We're here to help and want to make sure everyone feels welcome.\n\n` +
-                    `Here's the invite link if you'd like to rejoin:\n${inviteLink}\n\n`;
+                let comeBackMessage;
+                
+                // Check if custom message is configured for this guild
+                const customMessage = getInviteMessage(guild.id);
+                
+                if (customMessage) {
+                    // Use custom configured message with placeholders
+                    comeBackMessage = customMessage
+                        .replace(/{user}/g, member.user.tag)
+                        .replace(/{server}/g, guild.name)
+                        .replace(/{invite}/g, inviteLink);
+                } else {
+                    // Use default message
+                    comeBackMessage = `👋 Hey ${member.user.tag}!\n\n` +
+                        `We noticed you left **${guild.name}**. You're precious to us and we'd love to have you back! 💝\n\n` +
+                        `If you have any problems or concerns, please don't hesitate to contact me. We're here to help and want to make sure everyone feels welcome.\n\n` +
+                        `Here's the invite link if you'd like to rejoin:\n${inviteLink}\n\n`;
 
-                // Add server invitation if this is the target server
-                if (guild.id === TARGET_SERVER_ID) {
-                    comeBackMessage += `💎 **Also, join our main server and earn rewards!**\n` +
-                        `${YOUR_SERVER_INVITE}\n\n` +
-                        `🎁 **Rewards:**\n` +
-                        `• Get 5 Robux for each person you invite!\n` +
-                        `• Get 2 Robux just for joining!\n\n`;
+                    // Add server invitation if this is the target server
+                    if (guild.id === TARGET_SERVER_ID) {
+                        comeBackMessage += `💎 **Also, join our main server and earn rewards!**\n` +
+                            `${YOUR_SERVER_INVITE}\n\n` +
+                            `🎁 **Rewards:**\n` +
+                            `• Get 5 Robux for each person you invite!\n` +
+                            `• Get 2 Robux just for joining!\n\n`;
+                    }
+
+                    comeBackMessage += `We miss you already! Hope to see you soon! 💙`;
                 }
-
-                comeBackMessage += `We miss you already! Hope to see you soon! 💙`;
 
                 await member.user.send(comeBackMessage);
                 console.log(`✅ Sent come-back message to ${member.user.tag} (ID: ${member.user.id})`);
