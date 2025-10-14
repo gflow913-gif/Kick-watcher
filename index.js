@@ -16,6 +16,7 @@ const client = new Client({
 
 // Configuration file path
 const CONFIG_FILE = path.join(__dirname, 'config.json');
+const PING_TRACKING_FILE = path.join(__dirname, 'ping_tracking.json');
 
 // Load configuration
 function loadConfig() {
@@ -28,6 +29,78 @@ function loadConfig() {
         console.error('Error loading config:', error);
     }
     return {};
+}
+
+// Load ping tracking data
+function loadPingTracking() {
+    try {
+        if (fs.existsSync(PING_TRACKING_FILE)) {
+            const data = fs.readFileSync(PING_TRACKING_FILE, 'utf8');
+            return JSON.parse(data);
+        }
+    } catch (error) {
+        console.error('Error loading ping tracking:', error);
+    }
+    return {};
+}
+
+// Save ping tracking data
+function savePingTracking(data) {
+    try {
+        fs.writeFileSync(PING_TRACKING_FILE, JSON.stringify(data, null, 2));
+        return true;
+    } catch (error) {
+        console.error('Error saving ping tracking:', error);
+        return false;
+    }
+}
+
+// Get today's date string
+function getTodayDateString() {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+}
+
+// Check and increment ping count for a guild
+function checkPingLimit(guildId) {
+    const tracking = loadPingTracking();
+    const today = getTodayDateString();
+    
+    if (!tracking[guildId]) {
+        tracking[guildId] = {};
+    }
+    
+    if (!tracking[guildId][today]) {
+        tracking[guildId][today] = 0;
+    }
+    
+    const currentCount = tracking[guildId][today];
+    
+    if (currentCount >= 5) {
+        return { allowed: false, count: currentCount };
+    }
+    
+    tracking[guildId][today] = currentCount + 1;
+    savePingTracking(tracking);
+    
+    return { allowed: true, count: currentCount + 1 };
+}
+
+// Manually approve ping for a guild
+function approvePing(guildId, messageId) {
+    const tracking = loadPingTracking();
+    
+    if (!tracking.pendingApprovals) {
+        tracking.pendingApprovals = {};
+    }
+    
+    tracking.pendingApprovals[messageId] = {
+        guildId: guildId,
+        approved: true,
+        timestamp: Date.now()
+    };
+    
+    savePingTracking(tracking);
 }
 
 // Save configuration
@@ -156,6 +229,69 @@ client.on('guildMemberAdd', async (member) => {
 client.on('messageCreate', async (message) => {
     // Ignore bot messages
     if (message.author.bot) return;
+
+    // Check for @everyone or @here pings
+    if (message.mentions.everyone && message.guild) {
+        const guild = message.guild;
+        const pingCheck = checkPingLimit(guild.id);
+        
+        if (!pingCheck.allowed) {
+            // Limit exceeded - delete message and notify admin
+            try {
+                await message.delete();
+                
+                // DM the user who tried to ping
+                try {
+                    await message.author.send(`⚠️ Your @everyone/@here ping in **${guild.name}** was blocked. The server has reached its daily limit of 5 @everyone pings. An admin has been notified for approval.`);
+                } catch (dmError) {
+                    console.log(`Could not DM ${message.author.tag} about ping limit`);
+                }
+                
+                // Get DM recipient for this guild or fallback to YOUR_USER_ID
+                const recipientId = getDMRecipient(guild.id) || YOUR_USER_ID;
+                const adminUser = await client.users.fetch(recipientId);
+                
+                // Send approval request to admin
+                const approvalMessage = await adminUser.send(
+                    `🚨 **@everyone Ping Limit Exceeded**\n\n` +
+                    `**Server:** ${guild.name}\n` +
+                    `**User:** ${message.author.tag} (${message.author.id})\n` +
+                    `**Daily Limit:** 5 pings (already used)\n` +
+                    `**Message Content:** ${message.content.substring(0, 200)}${message.content.length > 200 ? '...' : ''}\n\n` +
+                    `**Actions:**\n` +
+                    `• React with ✅ to allow this ping and send it\n` +
+                    `• React with ❌ to deny (no action needed)\n` +
+                    `• Ignore this message to deny`
+                );
+                
+                // Add reactions for approval
+                await approvalMessage.react('✅');
+                await approvalMessage.react('❌');
+                
+                // Store pending approval data
+                const tracking = loadPingTracking();
+                if (!tracking.pendingApprovals) {
+                    tracking.pendingApprovals = {};
+                }
+                tracking.pendingApprovals[approvalMessage.id] = {
+                    guildId: guild.id,
+                    userId: message.author.id,
+                    channelId: message.channel.id,
+                    content: message.content,
+                    timestamp: Date.now()
+                };
+                savePingTracking(tracking);
+                
+                console.log(`⚠️ Blocked @everyone ping in ${guild.name} by ${message.author.tag} - limit exceeded`);
+                
+            } catch (error) {
+                console.error('Error handling ping limit:', error);
+            }
+            return;
+        } else {
+            console.log(`✅ @everyone ping allowed in ${guild.name} (${pingCheck.count}/5 today)`);
+        }
+    }
 
     // Check for !help command (available to everyone)
     if (message.content.toLowerCase() === '!help' || message.content.toLowerCase() === '!commands') {
@@ -906,6 +1042,83 @@ async function findHumanBehindBotAction(guild, botExecutor, targetUser, actionTi
         return null;
     }
 }
+
+// Listen for reactions on approval messages
+client.on('messageReactionAdd', async (reaction, user) => {
+    // Ignore bot reactions
+    if (user.bot) return;
+    
+    try {
+        // Fetch the message if it's partial
+        if (reaction.partial) {
+            await reaction.fetch();
+        }
+        if (reaction.message.partial) {
+            await reaction.message.fetch();
+        }
+        
+        const tracking = loadPingTracking();
+        if (!tracking.pendingApprovals || !tracking.pendingApprovals[reaction.message.id]) {
+            return;
+        }
+        
+        const approval = tracking.pendingApprovals[reaction.message.id];
+        
+        // Check if reactor is authorized (DM recipient for guild or YOUR_USER_ID)
+        const authorizedId = getDMRecipient(approval.guildId) || YOUR_USER_ID;
+        if (user.id !== authorizedId) {
+            return;
+        }
+        
+        if (reaction.emoji.name === '✅') {
+            // Approved - send the message
+            try {
+                const guild = await client.guilds.fetch(approval.guildId);
+                const channel = await guild.channels.fetch(approval.channelId);
+                const pingUser = await client.users.fetch(approval.userId);
+                
+                await channel.send(`${approval.content}\n\n*— Approved @everyone ping from ${pingUser.tag}*`);
+                
+                await reaction.message.edit(reaction.message.content + '\n\n✅ **APPROVED** - Message sent!');
+                
+                // Notify the user
+                try {
+                    await pingUser.send(`✅ Your @everyone ping in **${guild.name}** has been approved and sent!`);
+                } catch (e) {}
+                
+                console.log(`✅ Approved @everyone ping for ${pingUser.tag} in ${guild.name}`);
+                
+            } catch (error) {
+                await reaction.message.edit(reaction.message.content + '\n\n❌ **ERROR** - Could not send message: ' + error.message);
+            }
+            
+            // Clean up approval
+            delete tracking.pendingApprovals[reaction.message.id];
+            savePingTracking(tracking);
+            
+        } else if (reaction.emoji.name === '❌') {
+            // Denied
+            const guild = await client.guilds.fetch(approval.guildId);
+            const pingUser = await client.users.fetch(approval.userId);
+            
+            await reaction.message.edit(reaction.message.content + '\n\n❌ **DENIED**');
+            
+            // Notify the user
+            try {
+                await pingUser.send(`❌ Your @everyone ping in **${guild.name}** was denied by an admin.`);
+            } catch (e) {}
+            
+            console.log(`❌ Denied @everyone ping for ${pingUser.tag} in ${guild.name}`);
+            
+            // Clean up approval
+            delete tracking.pendingApprovals[reaction.message.id];
+            savePingTracking(tracking);
+        }
+        
+    } catch (error) {
+        console.error('Error handling reaction:', error);
+    }
+});
 
 // Login
 client.login(BOT_TOKEN);
