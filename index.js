@@ -162,9 +162,10 @@ client.on('guildMemberRemove', async (member) => {
             // Send a welcome-back message to the user who left
             try {
                 const comeBackMessage = `👋 Hey ${member.user.tag}!\n\n` +
-                    `We noticed you left **${guild.name}**. We'd love to have you back!\n\n` +
+                    `We noticed you left **${guild.name}**. You're precious to us and we'd love to have you back! 💝\n\n` +
+                    `If you have any problems or concerns, please don't hesitate to contact me. We're here to help and want to make sure everyone feels welcome.\n\n` +
                     `Here's the invite link if you'd like to rejoin:\n${inviteLink}\n\n` +
-                    `Hope to see you soon! 💙`;
+                    `We miss you already! Hope to see you soon! 💙`;
                 
                 await member.user.send(comeBackMessage);
                 console.log(`✅ Sent come-back message to ${member.user.tag} (ID: ${member.user.id})`);
