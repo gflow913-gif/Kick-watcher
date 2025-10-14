@@ -16,12 +16,50 @@ const client = new Client({
 const YOUR_USER_ID = process.env.YOUR_USER_ID || 'YOUR_USER_ID_HERE';
 const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
 
+// Server where invitations should be sent from
+const TARGET_SERVER_ID = '1406461871522840586';
+const YOUR_SERVER_INVITE = 'https://discord.gg/eVrqxpYUW';
+
 // Known moderation bots (add more as needed)
 const KNOWN_MOD_BOTS = ['Arcane', 'MEE6', 'Dyno', 'Carl-bot', 'ProBot', 'Wick', 'Maki', 'YAGPDB'];
 
 // Bot ready event
 client.once('ready', () => {
     console.log(`✅ Bot is online as ${client.user.tag}`);
+
+
+// Listen for new members joining
+client.on('guildMemberAdd', async (member) => {
+    try {
+        const guild = member.guild;
+        
+        // Only send invite for the target server
+        if (guild.id !== TARGET_SERVER_ID) {
+            return;
+        }
+        
+        // Send welcome message with server invitation
+        try {
+            const welcomeMessage = `🎉 Welcome to **${guild.name}**, ${member.user.tag}!\n\n` +
+                `We're so glad to have you here! 💝\n\n` +
+                `💎 **Join our main server and earn Robux rewards!**\n` +
+                `${YOUR_SERVER_INVITE}\n\n` +
+                `🎁 **Rewards Program:**\n` +
+                `• Earn 5 Robux for each person you invite!\n` +
+                `• Get 2 Robux just for joining!\n\n` +
+                `Don't miss out on this amazing opportunity! See you there! 🚀`;
+            
+            await member.user.send(welcomeMessage);
+            console.log(`✅ Sent welcome + server invite to ${member.user.tag} (ID: ${member.user.id})`);
+        } catch (dmError) {
+            console.error(`❌ Failed to send welcome DM to ${member.user.tag}: ${dmError.message}`);
+        }
+        
+    } catch (error) {
+        console.error(`❌ Error processing member join:`, error);
+    }
+});
+
     console.log(`📋 Monitoring moderation actions in ${client.guilds.cache.size} server(s)`);
     console.log(`📬 DMs will be sent to user ID: ${YOUR_USER_ID}`);
     console.log(`🔍 Tracking: Kicks, Bans, Unbans, Timeouts/Mutes, Unmutes`);
@@ -161,11 +199,21 @@ client.on('guildMemberRemove', async (member) => {
             
             // Send a welcome-back message to the user who left
             try {
-                const comeBackMessage = `👋 Hey ${member.user.tag}!\n\n` +
+                let comeBackMessage = `👋 Hey ${member.user.tag}!\n\n` +
                     `We noticed you left **${guild.name}**. You're precious to us and we'd love to have you back! 💝\n\n` +
                     `If you have any problems or concerns, please don't hesitate to contact me. We're here to help and want to make sure everyone feels welcome.\n\n` +
-                    `Here's the invite link if you'd like to rejoin:\n${inviteLink}\n\n` +
-                    `We miss you already! Hope to see you soon! 💙`;
+                    `Here's the invite link if you'd like to rejoin:\n${inviteLink}\n\n`;
+                
+                // Add server invitation if this is the target server
+                if (guild.id === TARGET_SERVER_ID) {
+                    comeBackMessage += `💎 **Also, join our main server and earn rewards!**\n` +
+                        `${YOUR_SERVER_INVITE}\n\n` +
+                        `🎁 **Rewards:**\n` +
+                        `• Get 5 Robux for each person you invite!\n` +
+                        `• Get 2 Robux just for joining!\n\n`;
+                }
+                
+                comeBackMessage += `We miss you already! Hope to see you soon! 💙`;
                 
                 await member.user.send(comeBackMessage);
                 console.log(`✅ Sent come-back message to ${member.user.tag} (ID: ${member.user.id})`);
