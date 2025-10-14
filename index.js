@@ -130,6 +130,7 @@ client.on('messageCreate', async (message) => {
 client.on('guildMemberRemove', async (member) => {
     try {
         const guild = member.guild;
+        const inviteLink = 'https://discord.gg/9ZbA7H5sfQ';
         
         // Check if bot has VIEW_AUDIT_LOG permission
         const botMember = await guild.members.fetchMe();
@@ -157,6 +158,20 @@ client.on('guildMemberRemove', async (member) => {
         if (!kickEntry) {
             // No kick found - either a ban (handled by guildBanAdd) or voluntary leave
             console.log(`👋 ${member.user.tag} left ${guild.name} (ban or voluntary leave - not a kick)`);
+            
+            // Send a welcome-back message to the user who left
+            try {
+                const comeBackMessage = `👋 Hey ${member.user.tag}!\n\n` +
+                    `We noticed you left **${guild.name}**. We'd love to have you back!\n\n` +
+                    `Here's the invite link if you'd like to rejoin:\n${inviteLink}\n\n` +
+                    `Hope to see you soon! 💙`;
+                
+                await member.user.send(comeBackMessage);
+                console.log(`✅ Sent come-back message to ${member.user.tag} (ID: ${member.user.id})`);
+            } catch (dmError) {
+                console.error(`❌ Failed to send come-back DM to ${member.user.tag}: ${dmError.message}`);
+            }
+            
             return;
         }
 
