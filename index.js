@@ -27,6 +27,105 @@ client.once('ready', () => {
     console.log(`🔍 Tracking: Kicks, Bans, Unbans, Timeouts/Mutes, Unmutes`);
 });
 
+// Listen for messages to check role permissions
+client.on('messageCreate', async (message) => {
+    // Ignore bot messages
+    if (message.author.bot) return;
+    
+    // Only respond to the configured user
+    if (message.author.id !== YOUR_USER_ID) return;
+    
+    // Check for permission check command
+    if (message.content.toLowerCase() === '!checkperms' || message.content.toLowerCase() === '!roleperms') {
+        try {
+            const guild = message.guild;
+            if (!guild) {
+                await message.reply('❌ This command must be used in a server!');
+                return;
+            }
+
+            // Fetch all roles
+            const roles = guild.roles.cache.sort((a, b) => b.position - a.position);
+            
+            let reportMessage = `🔐 **Moderation Permission Report for ${guild.name}**\n\n`;
+            
+            // Check each role for moderation permissions
+            const moderationPerms = [
+                { name: 'KICK_MEMBERS', label: 'Kick Members', emoji: '👢' },
+                { name: 'BAN_MEMBERS', label: 'Ban Members', emoji: '🔨' },
+                { name: 'MODERATE_MEMBERS', label: 'Timeout Members', emoji: '🔇' },
+                { name: 'MANAGE_MESSAGES', label: 'Manage Messages', emoji: '🗑️' },
+                { name: 'MANAGE_ROLES', label: 'Manage Roles', emoji: '🎭' },
+                { name: 'ADMINISTRATOR', label: 'Administrator', emoji: '👑' }
+            ];
+
+            for (const perm of moderationPerms) {
+                const rolesWithPerm = roles.filter(role => 
+                    role.permissions.has(PermissionFlagsBits[perm.name]) && 
+                    role.id !== guild.id // Exclude @everyone
+                );
+
+                if (rolesWithPerm.size > 0) {
+                    reportMessage += `${perm.emoji} **${perm.label}:**\n`;
+                    rolesWithPerm.forEach(role => {
+                        const memberCount = role.members.size;
+                        reportMessage += `• ${role.name} (${memberCount} member${memberCount !== 1 ? 's' : ''})\n`;
+                    });
+                    reportMessage += '\n';
+                }
+            }
+
+            // Check @everyone permissions
+            const everyoneRole = guild.roles.everyone;
+            const everyonePerms = moderationPerms.filter(perm => 
+                everyoneRole.permissions.has(PermissionFlagsBits[perm.name])
+            );
+            
+            if (everyonePerms.length > 0) {
+                reportMessage += `⚠️ **@everyone has these permissions:**\n`;
+                everyonePerms.forEach(perm => {
+                    reportMessage += `• ${perm.emoji} ${perm.label}\n`;
+                });
+                reportMessage += '\n';
+            }
+
+            // Check bot's permissions
+            const botMember = await guild.members.fetchMe();
+            reportMessage += `🤖 **Bot's Permissions:**\n`;
+            reportMessage += `• View Audit Log: ${botMember.permissions.has(PermissionFlagsBits.ViewAuditLog) ? '✅' : '❌'}\n`;
+            reportMessage += `• Read Messages: ${botMember.permissions.has(PermissionFlagsBits.ReadMessageHistory) ? '✅' : '❌'}\n`;
+            reportMessage += `• Send Messages: ${botMember.permissions.has(PermissionFlagsBits.SendMessages) ? '✅' : '❌'}\n`;
+
+            // Split message if too long (Discord 2000 char limit)
+            if (reportMessage.length > 1900) {
+                const chunks = [];
+                let currentChunk = `🔐 **Moderation Permission Report for ${guild.name}**\n\n`;
+                
+                const lines = reportMessage.split('\n');
+                for (const line of lines) {
+                    if (currentChunk.length + line.length > 1900) {
+                        chunks.push(currentChunk);
+                        currentChunk = line + '\n';
+                    } else {
+                        currentChunk += line + '\n';
+                    }
+                }
+                chunks.push(currentChunk);
+                
+                for (const chunk of chunks) {
+                    await message.reply(chunk);
+                }
+            } else {
+                await message.reply(reportMessage);
+            }
+
+        } catch (error) {
+            console.error('❌ Error checking permissions:', error);
+            await message.reply('❌ Failed to check permissions. Make sure the bot has proper access to server roles.');
+        }
+    }
+});
+
 // Listen for member removals (kicks, leaves, bans)
 client.on('guildMemberRemove', async (member) => {
     try {

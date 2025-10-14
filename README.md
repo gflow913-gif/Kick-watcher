@@ -11,6 +11,7 @@ A comprehensive Discord bot that monitors all moderation actions (kicks, bans, u
 - ✅ **Timeouts/Mutes** - Detects when members are timed out with duration tracking
 - ✅ **Unmutes** - Monitors when timeouts are removed
 - ✅ **Voluntary Leaves** - Distinguishes kicks from voluntary departures
+- ✅ **Permission Checker** - Check which roles have moderation permissions
 
 ### Advanced Detection
 - ✅ Identifies whether actions were performed by humans or bots
@@ -147,6 +148,17 @@ To run this bot 24/7 on Pella or any other hosting service:
 - `50013`: Missing permissions (needs View Audit Log)
 - `50001`: Missing access (check role permissions)
 - `TokenInvalid`: Invalid bot token in `.env`
+
+## Commands
+
+### Permission Check
+Type `!checkperms` or `!roleperms` in any server channel to get a detailed report of:
+- Which roles have kick, ban, timeout, and other moderation permissions
+- Number of members in each role
+- Whether @everyone has any moderation permissions
+- Bot's current permissions
+
+**Note**: This command only works for the configured user (YOUR_USER_ID).
 
 ## Known Moderation Bots
 
