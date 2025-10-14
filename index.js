@@ -1,5 +1,7 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 
 // Create Discord client with required intents
 const client = new Client({
@@ -11,6 +13,49 @@ const client = new Client({
         GatewayIntentBits.MessageContent // For optional bot message parsing
     ]
 });
+
+// Configuration file path
+const CONFIG_FILE = path.join(__dirname, 'config.json');
+
+// Load configuration
+function loadConfig() {
+    try {
+        if (fs.existsSync(CONFIG_FILE)) {
+            const data = fs.readFileSync(CONFIG_FILE, 'utf8');
+            return JSON.parse(data);
+        }
+    } catch (error) {
+        console.error('Error loading config:', error);
+    }
+    return {};
+}
+
+// Save configuration
+function saveConfig(config) {
+    try {
+        fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+        return true;
+    } catch (error) {
+        console.error('Error saving config:', error);
+        return false;
+    }
+}
+
+// Get DM recipient for a guild
+function getDMRecipient(guildId) {
+    const config = loadConfig();
+    return config[guildId]?.dmRecipient || null;
+}
+
+// Set DM recipient for a guild
+function setDMRecipient(guildId, userId) {
+    const config = loadConfig();
+    if (!config[guildId]) {
+        config[guildId] = {};
+    }
+    config[guildId].dmRecipient = userId;
+    return saveConfig(config);
+}
 
 // Configuration - Replace these with your actual values
 const YOUR_USER_ID = process.env.YOUR_USER_ID || 'YOUR_USER_ID_HERE';
@@ -73,7 +118,52 @@ client.on('messageCreate', async (message) => {
     // Ignore bot messages
     if (message.author.bot) return;
 
-    // Only respond to the configured user
+    // Check for !setdm command (available to server admins)
+    if (message.content.toLowerCase().startsWith('!setdm')) {
+        try {
+            const guild = message.guild;
+            if (!guild) {
+                await message.reply('❌ This command must be used in a server!');
+                return;
+            }
+
+            // Check if user has administrator permission
+            const member = await guild.members.fetch(message.author.id);
+            if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+                await message.reply('❌ You need Administrator permission to use this command!');
+                return;
+            }
+
+            const args = message.content.split(' ');
+            if (args.length < 2) {
+                await message.reply('❌ Usage: `!setdm <user_id>`\nExample: `!setdm 123456789012345678`');
+                return;
+            }
+
+            const userId = args[1].trim();
+            
+            // Validate user ID
+            try {
+                const user = await client.users.fetch(userId);
+                
+                // Save configuration
+                if (setDMRecipient(guild.id, userId)) {
+                    await message.reply(`✅ DM notifications for **${guild.name}** will now be sent to **${user.tag}** (ID: ${userId})`);
+                    console.log(`✅ ${message.author.tag} configured DM recipient for ${guild.name}: ${user.tag}`);
+                } else {
+                    await message.reply('❌ Failed to save configuration. Please try again.');
+                }
+            } catch (error) {
+                await message.reply('❌ Invalid user ID. Make sure the user exists and the bot can see them.');
+            }
+        } catch (error) {
+            console.error('Error in !setdm command:', error);
+            await message.reply('❌ An error occurred while processing the command.');
+        }
+        return;
+    }
+
+    // Only respond to the configured user for other commands
     if (message.author.id !== YOUR_USER_ID) return;
 
     // Check for permission check command
@@ -285,7 +375,7 @@ client.on('guildMemberRemove', async (member) => {
         }
 
         // Send DM to specified user
-        await sendDM(dmMessage, `Kick notification sent for ${removedUser.tag}`);
+        await sendDM(dmMessage, `Kick notification sent for ${removedUser.tag}`, guild.id);
 
     } catch (error) {
         console.error(`❌ Error processing member removal:`, error);
@@ -388,7 +478,7 @@ client.on('guildBanAdd', async (ban) => {
         }
 
         // Send DM
-        await sendDM(dmMessage, `Ban notification sent for ${bannedUser.tag}`);
+        await sendDM(dmMessage, `Ban notification sent for ${bannedUser.tag}`, guild.id);
 
     } catch (error) {
         console.error(`❌ Error processing ban:`, error);
@@ -456,7 +546,7 @@ client.on('guildBanRemove', async (ban) => {
         dmMessage += `• Unix: ${Math.floor(timestamp.getTime() / 1000)}\n`;
 
         // Send DM
-        await sendDM(dmMessage, `Unban notification sent for ${unbannedUser.tag}`);
+        await sendDM(dmMessage, `Unban notification sent for ${unbannedUser.tag}`, guild.id);
 
     } catch (error) {
         console.error(`❌ Error processing unban:`, error);
@@ -571,7 +661,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         }
 
         // Send DM
-        await sendDM(dmMessage, `${isMute ? 'Mute' : 'Unmute'} notification sent for ${newMember.user.tag}`);
+        await sendDM(dmMessage, `${isMute ? 'Mute' : 'Unmute'} notification sent for ${newMember.user.tag}`, guild.id);
 
     } catch (error) {
         console.error(`❌ Error processing member update:`, error);
@@ -579,9 +669,17 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 });
 
 // Helper function to send moderation alert DMs
-async function sendDM(message, logText) {
+async function sendDM(message, logText, guildId) {
     try {
-        const user = await client.users.fetch(DM_CONFIG.MODERATION_ALERTS);
+        // Get configured DM recipient for this guild
+        const recipientId = getDMRecipient(guildId);
+        
+        if (!recipientId) {
+            console.log(`⚠️ No DM recipient configured for guild ${guildId}. Use !setdm <user_id> to configure.`);
+            return;
+        }
+        
+        const user = await client.users.fetch(recipientId);
         await user.send(message);
         console.log(`✅ ${logText}`);
     } catch (error) {
