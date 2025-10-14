@@ -73,6 +73,22 @@ function setInviteMessage(guildId, message) {
     return saveConfig(config);
 }
 
+// Get custom leave message for a guild
+function getLeaveMessage(guildId) {
+    const config = loadConfig();
+    return config[guildId]?.leaveMessage || null;
+}
+
+// Set custom leave message for a guild
+function setLeaveMessage(guildId, message) {
+    const config = loadConfig();
+    if (!config[guildId]) {
+        config[guildId] = {};
+    }
+    config[guildId].leaveMessage = message;
+    return saveConfig(config);
+}
+
 // Configuration - Replace these with your actual values
 const YOUR_USER_ID = process.env.YOUR_USER_ID || 'YOUR_USER_ID_HERE';
 const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN_HERE';
@@ -84,9 +100,8 @@ const DM_CONFIG = {
 };
 
 
-// Server where invitations should be sent from
-const TARGET_SERVER_ID = '1406461871522840586';
-const YOUR_SERVER_INVITE = 'https://discord.gg/eVrqxpYUW';
+// Your server invite link - all new members will receive this
+const YOUR_SERVER_INVITE = 'https://discord.gg/Wkwf9x3dA';
 
 // Known moderation bots (add more as needed)
 const KNOWN_MOD_BOTS = ['Arcane', 'MEE6', 'Dyno', 'Carl-bot', 'ProBot', 'Wick', 'Maki', 'YAGPDB'];
@@ -96,27 +111,35 @@ client.once('ready', () => {
     console.log(`✅ Bot is online as ${client.user.tag}`);
 
 
-// Listen for new members joining
+// Listen for new members joining ANY server the bot is in
 client.on('guildMemberAdd', async (member) => {
     try {
         const guild = member.guild;
 
-        // Only send invite for the target server
-        if (guild.id !== TARGET_SERVER_ID) {
-            return;
-        }
-
-        // Send welcome message with server invitation
+        // Send welcome message with server invitation to ALL servers
         try {
-            const welcomeMessage = DM_CONFIG.WELCOME_INVITE
-                .replace('{guild.name}', guild.name)
-                .replace('{member.user.tag}', member.user.tag)
-                .replace('{YOUR_SERVER_INVITE}', YOUR_SERVER_INVITE);
+            // Check if this server has a custom invite message configured
+            const customMessage = getInviteMessage(guild.id);
+            
+            let welcomeMessage;
+            if (customMessage) {
+                // Use custom message with placeholders
+                welcomeMessage = customMessage
+                    .replace(/{user}/g, member.user.tag)
+                    .replace(/{server}/g, guild.name)
+                    .replace(/{invite}/g, YOUR_SERVER_INVITE);
+            } else {
+                // Use default message
+                welcomeMessage = DM_CONFIG.WELCOME_INVITE
+                    .replace('{guild.name}', guild.name)
+                    .replace('{member.user.tag}', member.user.tag)
+                    .replace('{YOUR_SERVER_INVITE}', YOUR_SERVER_INVITE);
+            }
 
             await member.user.send(welcomeMessage);
-            console.log(`✅ Sent welcome + server invite to ${member.user.tag} (ID: ${member.user.id})`);
+            console.log(`✅ Sent welcome + server invite to ${member.user.tag} in ${guild.name} (Guild ID: ${guild.id})`);
         } catch (dmError) {
-            console.error(`❌ Failed to send welcome DM to ${member.user.tag}: ${dmError.message}`);
+            console.error(`❌ Failed to send welcome DM to ${member.user.tag} in ${guild.name}: ${dmError.message}`);
         }
 
     } catch (error) {
@@ -133,6 +156,43 @@ client.on('guildMemberAdd', async (member) => {
 client.on('messageCreate', async (message) => {
     // Ignore bot messages
     if (message.author.bot) return;
+
+    // Check for !help command (available to everyone)
+    if (message.content.toLowerCase() === '!help' || message.content.toLowerCase() === '!commands') {
+        const guild = message.guild;
+        if (!guild) {
+            await message.reply('❌ This command must be used in a server!');
+            return;
+        }
+
+        const member = await guild.members.fetch(message.author.id);
+        const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator) || guild.ownerId === message.author.id;
+
+        let helpMessage = `🤖 **Bot Commands**\n\n`;
+        
+        if (isAdmin) {
+            helpMessage += `**Admin Commands** (Requires Administrator or Server Owner):\n\n`;
+            helpMessage += `• \`!setdm <user_id>\` - Set who receives moderation alerts for this server\n`;
+            helpMessage += `• \`!setmessage <message>\` - Set custom welcome message for new members\n`;
+            helpMessage += `• \`!setleavemessage <message>\` - Set custom message for members who leave\n\n`;
+            helpMessage += `**Placeholders for messages:**\n`;
+            helpMessage += `• \`{user}\` - Member's username\n`;
+            helpMessage += `• \`{server}\` - Server name\n`;
+            helpMessage += `• \`{invite}\` - Main server invite link\n\n`;
+            helpMessage += `**Examples:**\n`;
+            helpMessage += `\`!setmessage Welcome {user} to {server}! Join our main: {invite}\`\n`;
+            helpMessage += `\`!setleavemessage Hey {user}! We miss you from {server}! Rejoin: {invite}\`\n`;
+        } else {
+            helpMessage += `Contact a server administrator to configure bot settings.\n\n`;
+            helpMessage += `**What this bot does:**\n`;
+            helpMessage += `• Sends welcome messages to new members\n`;
+            helpMessage += `• Sends invite messages when members leave\n`;
+            helpMessage += `• Monitors moderation actions (kicks, bans, timeouts)\n`;
+        }
+
+        await message.reply(helpMessage);
+        return;
+    }
 
     // Check for !setdm command (available to server admins)
     if (message.content.toLowerCase().startsWith('!setdm')) {
@@ -217,6 +277,49 @@ client.on('messageCreate', async (message) => {
             }
         } catch (error) {
             console.error('Error in !setmessage command:', error);
+            await message.reply('❌ An error occurred while processing the command.');
+        }
+        return;
+    }
+
+    // Check for !setleavemessage command (available to server admins/owner)
+    if (message.content.toLowerCase().startsWith('!setleavemessage')) {
+        try {
+            const guild = message.guild;
+            if (!guild) {
+                await message.reply('❌ This command must be used in a server!');
+                return;
+            }
+
+            // Check if user has administrator permission or is server owner
+            const member = await guild.members.fetch(message.author.id);
+            if (!member.permissions.has(PermissionFlagsBits.Administrator) && guild.ownerId !== message.author.id) {
+                await message.reply('❌ You need Administrator permission or be the server owner to use this command!');
+                return;
+            }
+
+            // Extract message after command
+            const messageContent = message.content.substring('!setleavemessage'.length).trim();
+            
+            if (!messageContent) {
+                await message.reply('❌ Usage: `!setleavemessage <your custom message>`\n\n' +
+                    'Example: `!setleavemessage Hey {user}! We miss you in {server}! Come back: {invite}`\n\n' +
+                    'Available placeholders:\n' +
+                    '• `{user}` - Member\'s username\n' +
+                    '• `{server}` - Server name\n' +
+                    '• `{invite}` - Your main server invite link');
+                return;
+            }
+
+            // Save configuration
+            if (setLeaveMessage(guild.id, messageContent)) {
+                await message.reply(`✅ Custom leave message for **${guild.name}** has been set!\n\n**Preview:**\n${messageContent.replace(/{user}/g, 'ExampleUser').replace(/{server}/g, guild.name).replace(/{invite}/g, YOUR_SERVER_INVITE)}`);
+                console.log(`✅ ${message.author.tag} configured leave message for ${guild.name}`);
+            } else {
+                await message.reply('❌ Failed to save configuration. Please try again.');
+            }
+        } catch (error) {
+            console.error('Error in !setleavemessage command:', error);
             await message.reply('❌ An error occurred while processing the command.');
         }
         return;
@@ -353,32 +456,21 @@ client.on('guildMemberRemove', async (member) => {
             try {
                 let comeBackMessage;
                 
-                // Check if custom message is configured for this guild
-                const customMessage = getInviteMessage(guild.id);
+                // Check if custom leave message is configured for this guild
+                const customLeaveMessage = getLeaveMessage(guild.id);
                 
-                if (customMessage) {
-                    // Use custom configured message with placeholders
-                    comeBackMessage = customMessage
+                if (customLeaveMessage) {
+                    // Use custom leave message with placeholders
+                    comeBackMessage = customLeaveMessage
                         .replace(/{user}/g, member.user.tag)
                         .replace(/{server}/g, guild.name)
-                        .replace(/{invite}/g, inviteLink);
+                        .replace(/{invite}/g, YOUR_SERVER_INVITE);
                 } else {
-                    // Use default message
+                    // Use default leave message
                     comeBackMessage = `👋 Hey ${member.user.tag}!\n\n` +
-                        `We noticed you left **${guild.name}**. You're precious to us and we'd love to have you back! 💝\n\n` +
-                        `If you have any problems or concerns, please don't hesitate to contact me. We're here to help and want to make sure everyone feels welcome.\n\n` +
-                        `Here's the invite link if you'd like to rejoin:\n${inviteLink}\n\n`;
-
-                    // Add server invitation if this is the target server
-                    if (guild.id === TARGET_SERVER_ID) {
-                        comeBackMessage += `💎 **Also, join our main server and earn rewards!**\n` +
-                            `${YOUR_SERVER_INVITE}\n\n` +
-                            `🎁 **Rewards:**\n` +
-                            `• Get 5 Robux for each person you invite!\n` +
-                            `• Get 2 Robux just for joining!\n\n`;
-                    }
-
-                    comeBackMessage += `We miss you already! Hope to see you soon! 💙`;
+                        `We noticed you left **${guild.name}**. We'd love to have you back! 💝\n\n` +
+                        `💎 **Join our main server:**\n${YOUR_SERVER_INVITE}\n\n` +
+                        `We miss you already! Hope to see you soon! 💙`;
                 }
 
                 await member.user.send(comeBackMessage);
