@@ -118,7 +118,9 @@ function saveConfig(config) {
 // Get DM recipient for a guild
 function getDMRecipient(guildId) {
     const config = loadConfig();
-    return config[guildId]?.dmRecipient || nullnull
+    return config[guildId]?.dmRecipient || null;
+}
+
 // Set DM recipient for a guild
 function setDMRecipient(guildId, userId) {
     const config = loadConfig();
