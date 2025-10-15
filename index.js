@@ -10,7 +10,8 @@ const client = new Client({
         GatewayIntentBits.GuildMembers, // Required to detect member removals and updates
         GatewayIntentBits.GuildModeration, // Required for ban events
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent // For optional bot message parsing
+        GatewayIntentBits.MessageContent, // For optional bot message parsing
+        GatewayIntentBits.GuildPresences // Required for status monitoring
     ]
 });
 
@@ -1125,7 +1126,9 @@ const WAKE_UP_CONFIG = {
     messageInterval: 3000, // 3 seconds between messages to respect rate limits
     pingInterval: 5, // Ping every 5th message
     isActive: false,
-    messageCount: 0
+    messageCount: 0,
+    lastStatus: null,
+    statusCheckInterval: null
 };
 
 // Load wake-up state
@@ -1166,19 +1169,47 @@ async function startWakeUpMonitoring() {
         
         try {
             const user = await client.users.fetch(WAKE_UP_CONFIG.targetUserId);
+            
+            // Get user's presence status across all guilds
+            let userStatus = null;
+            for (const [guildId, guild] of client.guilds.cache) {
+                try {
+                    const member = await guild.members.fetch(WAKE_UP_CONFIG.targetUserId);
+                    if (member && member.presence) {
+                        userStatus = member.presence.status;
+                        break;
+                    }
+                } catch (err) {
+                    // User not in this guild, continue
+                }
+            }
+            
+            // If status is invisible/offline, skip sending DM
+            if (userStatus === 'offline' || userStatus === 'invisible') {
+                console.log(`⏸️ User ${user.tag} is ${userStatus || 'offline'}, skipping DM (will ping when online)`);
+                // Schedule next check with rate limit delay
+                setTimeout(sendWakeUpDM, WAKE_UP_CONFIG.messageInterval);
+                return;
+            }
+            
             WAKE_UP_CONFIG.messageCount++;
             
             let message = `⏰ Wake up! It's time to check the server!\n\nMessage #${WAKE_UP_CONFIG.messageCount}`;
             
-            // Add ping every 5th message
-            if (WAKE_UP_CONFIG.messageCount % WAKE_UP_CONFIG.pingInterval === 0) {
-                message += `\n\n🔔 **PING! This is your ${WAKE_UP_CONFIG.messageCount / WAKE_UP_CONFIG.pingInterval}th ping!**`;
+            // Add ping every 5th message OR if user just came online
+            const justCameOnline = WAKE_UP_CONFIG.lastStatus === 'offline' && (userStatus === 'online' || userStatus === 'dnd' || userStatus === 'idle');
+            
+            if (WAKE_UP_CONFIG.messageCount % WAKE_UP_CONFIG.pingInterval === 0 || justCameOnline) {
+                message += `\n\n🔔 **PING! ${justCameOnline ? 'You just came online!' : `This is your ${Math.floor(WAKE_UP_CONFIG.messageCount / WAKE_UP_CONFIG.pingInterval)}th ping!`}**`;
             }
             
             message += `\n\nType "waked up" in <#${WAKE_UP_CONFIG.targetChannelId}> to stop these messages.`;
             
             await user.send(message);
-            console.log(`✅ Sent wake-up DM #${WAKE_UP_CONFIG.messageCount} to ${user.tag}${WAKE_UP_CONFIG.messageCount % WAKE_UP_CONFIG.pingInterval === 0 ? ' (WITH PING)' : ''}`);
+            console.log(`✅ Sent wake-up DM #${WAKE_UP_CONFIG.messageCount} to ${user.tag} (status: ${userStatus})${WAKE_UP_CONFIG.messageCount % WAKE_UP_CONFIG.pingInterval === 0 || justCameOnline ? ' (WITH PING)' : ''}`);
+            
+            // Update last status
+            WAKE_UP_CONFIG.lastStatus = userStatus;
             
             // Save state
             saveWakeUpState({
@@ -1205,6 +1236,7 @@ function stopWakeUpMonitoring() {
     WAKE_UP_CONFIG.isActive = false;
     const totalMessages = WAKE_UP_CONFIG.messageCount;
     WAKE_UP_CONFIG.messageCount = 0;
+    WAKE_UP_CONFIG.lastStatus = null;
     
     saveWakeUpState({
         isActive: false,
