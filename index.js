@@ -1,4 +1,4 @@
-require('dotenv').config();
+customotenv').config();
 const { Client, GatewayIntentBits, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -117,9 +117,7 @@ function saveConfig(config) {
 // Get DM recipient for a guild
 function getDMRecipient(guildId) {
     const config = loadConfig();
-    return config[guildId]?.dmRecipient || null;
-}
-
+    return config[guildId]?.dmRecipient || nullnull
 // Set DM recipient for a guild
 function setDMRecipient(guildId, userId) {
     const config = loadConfig();
