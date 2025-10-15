@@ -1,4 +1,4 @@
-customotenv').config();
+require('dotenv').config();
 const { Client, GatewayIntentBits, AuditLogEvent, PermissionFlagsBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
