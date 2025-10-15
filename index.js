@@ -1118,5 +1118,510 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
 });
 
+// Wake-up monitoring configuration
+const WAKE_UP_CONFIG = {
+    targetUserId: '1406461871522840586',
+    targetChannelId: '1406461871522840586',
+    messageInterval: 3000, // 3 seconds between messages to respect rate limits
+    pingInterval: 5, // Ping every 5th message
+    isActive: false,
+    messageCount: 0
+};
+
+// Load wake-up state
+const WAKEUP_STATE_FILE = path.join(__dirname, 'wakeup_state.json');
+
+function loadWakeUpState() {
+    try {
+        if (fs.existsSync(WAKEUP_STATE_FILE)) {
+            const data = fs.readFileSync(WAKEUP_STATE_FILE, 'utf8');
+            return JSON.parse(data);
+        }
+    } catch (error) {
+        console.error('Error loading wake-up state:', error);
+    }
+    return { isActive: false, messageCount: 0 };
+}
+
+function saveWakeUpState(state) {
+    try {
+        fs.writeFileSync(WAKEUP_STATE_FILE, JSON.stringify(state, null, 2));
+    } catch (error) {
+        console.error('Error saving wake-up state:', error);
+    }
+}
+
+// Start wake-up monitoring
+async function startWakeUpMonitoring() {
+    const state = loadWakeUpState();
+    WAKE_UP_CONFIG.isActive = true;
+    WAKE_UP_CONFIG.messageCount = state.messageCount || 0;
+    
+    console.log(`🔔 Wake-up monitoring started for user ${WAKE_UP_CONFIG.targetUserId}`);
+    
+    const sendWakeUpDM = async () => {
+        if (!WAKE_UP_CONFIG.isActive) {
+            return;
+        }
+        
+        try {
+            const user = await client.users.fetch(WAKE_UP_CONFIG.targetUserId);
+            WAKE_UP_CONFIG.messageCount++;
+            
+            let message = `⏰ Wake up! It's time to check the server!\n\nMessage #${WAKE_UP_CONFIG.messageCount}`;
+            
+            // Add ping every 5th message
+            if (WAKE_UP_CONFIG.messageCount % WAKE_UP_CONFIG.pingInterval === 0) {
+                message += `\n\n🔔 **PING! This is your ${WAKE_UP_CONFIG.messageCount / WAKE_UP_CONFIG.pingInterval}th ping!**`;
+            }
+            
+            message += `\n\nType "waked up" in <#${WAKE_UP_CONFIG.targetChannelId}> to stop these messages.`;
+            
+            await user.send(message);
+            console.log(`✅ Sent wake-up DM #${WAKE_UP_CONFIG.messageCount} to ${user.tag}${WAKE_UP_CONFIG.messageCount % WAKE_UP_CONFIG.pingInterval === 0 ? ' (WITH PING)' : ''}`);
+            
+            // Save state
+            saveWakeUpState({
+                isActive: WAKE_UP_CONFIG.isActive,
+                messageCount: WAKE_UP_CONFIG.messageCount
+            });
+            
+            // Schedule next message with rate limit delay
+            setTimeout(sendWakeUpDM, WAKE_UP_CONFIG.messageInterval);
+            
+        } catch (error) {
+            console.error(`❌ Failed to send wake-up DM:`, error);
+            // Retry after a longer delay if there's an error
+            setTimeout(sendWakeUpDM, WAKE_UP_CONFIG.messageInterval * 2);
+        }
+    };
+    
+    // Start sending messages
+    sendWakeUpDM();
+}
+
+// Stop wake-up monitoring
+function stopWakeUpMonitoring() {
+    WAKE_UP_CONFIG.isActive = false;
+    const totalMessages = WAKE_UP_CONFIG.messageCount;
+    WAKE_UP_CONFIG.messageCount = 0;
+    
+    saveWakeUpState({
+        isActive: false,
+        messageCount: 0
+    });
+    
+    console.log(`🛑 Wake-up monitoring stopped. Sent ${totalMessages} total messages.`);
+    return totalMessages;
+}
+
+// Monitor for "waked up" message
+client.on('messageCreate', async (message) => {
+    // Check if it's the target user in the target channel saying "waked up"
+    if (message.author.id === WAKE_UP_CONFIG.targetUserId && 
+        message.channel.id === WAKE_UP_CONFIG.targetChannelId &&
+        message.content.toLowerCase().includes('waked up')) {
+        
+        if (WAKE_UP_CONFIG.isActive) {
+            const totalMessages = stopWakeUpMonitoring();
+            
+            try {
+                await message.reply(`✅ Good morning! You're finally awake! I sent you ${totalMessages} messages to wake you up. 😊`);
+                
+                const user = await client.users.fetch(WAKE_UP_CONFIG.targetUserId);
+                await user.send(`✅ Wake-up monitoring stopped! You responded after ${totalMessages} messages. Have a great day! 🌟`);
+            } catch (error) {
+                console.error('Error sending confirmation:', error);
+            }
+        }
+    }
+    
+    // Original message handling code continues here...
+    if (message.author.bot) return;
+
+    // Check for @everyone or @here pings
+    if (message.mentions.everyone && message.guild) {
+        const guild = message.guild;
+        const pingCheck = checkPingLimit(guild.id);
+        
+        if (!pingCheck.allowed) {
+            // Limit exceeded - delete message and notify admin
+            try {
+                await message.delete();
+                
+                // DM the user who tried to ping
+                try {
+                    await message.author.send(`⚠️ Your @everyone/@here ping in **${guild.name}** was blocked. The server has reached its daily limit of 5 @everyone pings. An admin has been notified for approval.`);
+                } catch (dmError) {
+                    console.log(`Could not DM ${message.author.tag} about ping limit`);
+                }
+                
+                // Get DM recipient for this guild or fallback to YOUR_USER_ID
+                const recipientId = getDMRecipient(guild.id) || YOUR_USER_ID;
+                const adminUser = await client.users.fetch(recipientId);
+                
+                // Send approval request to admin
+                const approvalMessage = await adminUser.send(
+                    `🚨 **@everyone Ping Limit Exceeded**\n\n` +
+                    `**Server:** ${guild.name}\n` +
+                    `**User:** ${message.author.tag} (${message.author.id})\n` +
+                    `**Daily Limit:** 5 pings (already used)\n` +
+                    `**Message Content:** ${message.content.substring(0, 200)}${message.content.length > 200 ? '...' : ''}\n\n` +
+                    `**Actions:**\n` +
+                    `• React with ✅ to allow this ping and send it\n` +
+                    `• React with ❌ to deny (no action needed)\n` +
+                    `• Ignore this message to deny`
+                );
+                
+                // Add reactions for approval
+                await approvalMessage.react('✅');
+                await approvalMessage.react('❌');
+                
+                // Store pending approval data
+                const tracking = loadPingTracking();
+                if (!tracking.pendingApprovals) {
+                    tracking.pendingApprovals = {};
+                }
+                tracking.pendingApprovals[approvalMessage.id] = {
+                    guildId: guild.id,
+                    userId: message.author.id,
+                    channelId: message.channel.id,
+                    content: message.content,
+                    timestamp: Date.now()
+                };
+                savePingTracking(tracking);
+                
+                console.log(`⚠️ Blocked @everyone ping in ${guild.name} by ${message.author.tag} - limit exceeded`);
+                
+            } catch (error) {
+                console.error('Error handling ping limit:', error);
+            }
+            return;
+        } else {
+            console.log(`✅ @everyone ping allowed in ${guild.name} (${pingCheck.count}/5 today)`);
+        }
+    }
+
+    // Check for !help command (available to everyone)
+    if (message.content.toLowerCase() === '!help' || message.content.toLowerCase() === '!commands') {
+        const guild = message.guild;
+        if (!guild) {
+            await message.reply('❌ This command must be used in a server!');
+            return;
+        }
+
+        const member = await guild.members.fetch(message.author.id);
+        const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator) || guild.ownerId === message.author.id;
+
+        let helpMessage = `🤖 **Bot Commands**\n\n`;
+        
+        if (isAdmin) {
+            helpMessage += `**Admin Commands** (Requires Administrator or Server Owner):\n\n`;
+            helpMessage += `• \`!setdm <user_id>\` - Set who receives moderation alerts for this server\n`;
+            helpMessage += `• \`!setmessage <message>\` - Set custom welcome message for new members\n`;
+            helpMessage += `• \`!setleavemessage <message>\` - Set custom message for members who leave\n`;
+            helpMessage += `• \`!startwakeup\` - Start wake-up monitoring for configured user\n`;
+            helpMessage += `• \`!stopwakeup\` - Stop wake-up monitoring\n\n`;
+            helpMessage += `**Placeholders for messages:**\n`;
+            helpMessage += `• \`{user}\` - Member's username\n`;
+            helpMessage += `• \`{server}\` - Server name\n`;
+            helpMessage += `• \`{invite}\` - Main server invite link\n\n`;
+            helpMessage += `**Examples:**\n`;
+            helpMessage += `\`!setmessage Welcome {user} to {server}! Join our main: {invite}\`\n`;
+            helpMessage += `\`!setleavemessage Hey {user}! We miss you from {server}! Rejoin: {invite}\`\n`;
+        } else {
+            helpMessage += `Contact a server administrator to configure bot settings.\n\n`;
+            helpMessage += `**What this bot does:**\n`;
+            helpMessage += `• Sends welcome messages to new members\n`;
+            helpMessage += `• Sends invite messages when members leave\n`;
+            helpMessage += `• Monitors moderation actions (kicks, bans, timeouts)\n`;
+        }
+
+        await message.reply(helpMessage);
+        return;
+    }
+
+    // Check for !startwakeup command (admin only)
+    if (message.content.toLowerCase() === '!startwakeup') {
+        const guild = message.guild;
+        if (!guild) {
+            await message.reply('❌ This command must be used in a server!');
+            return;
+        }
+
+        const member = await guild.members.fetch(message.author.id);
+        if (!member.permissions.has(PermissionFlagsBits.Administrator) && guild.ownerId !== message.author.id) {
+            await message.reply('❌ You need Administrator permission or be the server owner to use this command!');
+            return;
+        }
+
+        if (WAKE_UP_CONFIG.isActive) {
+            await message.reply('⚠️ Wake-up monitoring is already active!');
+            return;
+        }
+
+        startWakeUpMonitoring();
+        await message.reply(`✅ Wake-up monitoring started! User <@${WAKE_UP_CONFIG.targetUserId}> will receive DMs every 3 seconds (with a ping every 5th message) until they type "waked up" in <#${WAKE_UP_CONFIG.targetChannelId}>.`);
+        return;
+    }
+
+    // Check for !stopwakeup command (admin only)
+    if (message.content.toLowerCase() === '!stopwakeup') {
+        const guild = message.guild;
+        if (!guild) {
+            await message.reply('❌ This command must be used in a server!');
+            return;
+        }
+
+        const member = await guild.members.fetch(message.author.id);
+        if (!member.permissions.has(PermissionFlagsBits.Administrator) && guild.ownerId !== message.author.id) {
+            await message.reply('❌ You need Administrator permission or be the server owner to use this command!');
+            return;
+        }
+
+        if (!WAKE_UP_CONFIG.isActive) {
+            await message.reply('⚠️ Wake-up monitoring is not currently active!');
+            return;
+        }
+
+        const totalMessages = stopWakeUpMonitoring();
+        await message.reply(`✅ Wake-up monitoring stopped! Sent ${totalMessages} total messages.`);
+        return;
+    }
+
+    // Check for !setdm command (available to server admins)
+    if (message.content.toLowerCase().startsWith('!setdm')) {
+        try {
+            const guild = message.guild;
+            if (!guild) {
+                await message.reply('❌ This command must be used in a server!');
+                return;
+            }
+
+            // Check if user has administrator permission or is server owner
+            const member = await guild.members.fetch(message.author.id);
+            if (!member.permissions.has(PermissionFlagsBits.Administrator) && guild.ownerId !== message.author.id) {
+                await message.reply('❌ You need Administrator permission or be the server owner to use this command!');
+                return;
+            }
+
+            const args = message.content.split(' ');
+            if (args.length < 2) {
+                await message.reply('❌ Usage: `!setdm <user_id>`\nExample: `!setdm 123456789012345678`');
+                return;
+            }
+
+            const userId = args[1].trim();
+            
+            // Validate user ID
+            try {
+                const user = await client.users.fetch(userId);
+                
+                // Save configuration
+                if (setDMRecipient(guild.id, userId)) {
+                    await message.reply(`✅ DM notifications for **${guild.name}** will now be sent to **${user.tag}** (ID: ${userId})`);
+                    console.log(`✅ ${message.author.tag} configured DM recipient for ${guild.name}: ${user.tag}`);
+                } else {
+                    await message.reply('❌ Failed to save configuration. Please try again.');
+                }
+            } catch (error) {
+                await message.reply('❌ Invalid user ID. Make sure the user exists and the bot can see them.');
+            }
+        } catch (error) {
+            console.error('Error in !setdm command:', error);
+            await message.reply('❌ An error occurred while processing the command.');
+        }
+        return;
+    }
+
+    // Check for !setmessage command (available to server admins/owner)
+    if (message.content.toLowerCase().startsWith('!setmessage')) {
+        try {
+            const guild = message.guild;
+            if (!guild) {
+                await message.reply('❌ This command must be used in a server!');
+                return;
+            }
+
+            // Check if user has administrator permission or is server owner
+            const member = await guild.members.fetch(message.author.id);
+            if (!member.permissions.has(PermissionFlagsBits.Administrator) && guild.ownerId !== message.author.id) {
+                await message.reply('❌ You need Administrator permission or be the server owner to use this command!');
+                return;
+            }
+
+            // Extract message after command
+            const messageContent = message.content.substring('!setmessage'.length).trim();
+            
+            if (!messageContent) {
+                await message.reply('❌ Usage: `!setmessage <your custom message>`\n\n' +
+                    'Example: `!setmessage Hey {user}! We miss you in {server}! Come back: {invite}`\n\n' +
+                    'Available placeholders:\n' +
+                    '• `{user}` - Member\'s username\n' +
+                    '• `{server}` - Server name\n' +
+                    '• `{invite}` - Server invite link');
+                return;
+            }
+
+            // Save configuration
+            if (setInviteMessage(guild.id, messageContent)) {
+                await message.reply(`✅ Custom invite message for **${guild.name}** has been set!\n\n**Preview:**\n${messageContent.replace('{user}', 'ExampleUser').replace('{server}', guild.name).replace('{invite}', 'https://discord.gg/example')}`);
+                console.log(`✅ ${message.author.tag} configured invite message for ${guild.name}`);
+            } else {
+                await message.reply('❌ Failed to save configuration. Please try again.');
+            }
+        } catch (error) {
+            console.error('Error in !setmessage command:', error);
+            await message.reply('❌ An error occurred while processing the command.');
+        }
+        return;
+    }
+
+    // Check for !setleavemessage command (available to server admins/owner)
+    if (message.content.toLowerCase().startsWith('!setleavemessage')) {
+        try {
+            const guild = message.guild;
+            if (!guild) {
+                await message.reply('❌ This command must be used in a server!');
+                return;
+            }
+
+            // Check if user has administrator permission or is server owner
+            const member = await guild.members.fetch(message.author.id);
+            if (!member.permissions.has(PermissionFlagsBits.Administrator) && guild.ownerId !== message.author.id) {
+                await message.reply('❌ You need Administrator permission or be the server owner to use this command!');
+                return;
+            }
+
+            // Extract message after command
+            const messageContent = message.content.substring('!setleavemessage'.length).trim();
+            
+            if (!messageContent) {
+                await message.reply('❌ Usage: `!setleavemessage <your custom message>`\n\n' +
+                    'Example: `!setleavemessage Hey {user}! We miss you in {server}! Come back: {invite}`\n\n' +
+                    'Available placeholders:\n' +
+                    '• `{user}` - Member\'s username\n' +
+                    '• `{server}` - Server name\n' +
+                    '• `{invite}` - Your main server invite link');
+                return;
+            }
+
+            // Save configuration
+            if (setLeaveMessage(guild.id, messageContent)) {
+                await message.reply(`✅ Custom leave message for **${guild.name}** has been set!\n\n**Preview:**\n${messageContent.replace(/{user}/g, 'ExampleUser').replace(/{server}/g, guild.name).replace(/{invite}/g, YOUR_SERVER_INVITE)}`);
+                console.log(`✅ ${message.author.tag} configured leave message for ${guild.name}`);
+            } else {
+                await message.reply('❌ Failed to save configuration. Please try again.');
+            }
+        } catch (error) {
+            console.error('Error in !setleavemessage command:', error);
+            await message.reply('❌ An error occurred while processing the command.');
+        }
+        return;
+    }
+
+    // Only respond to the configured user for other commands
+    if (message.author.id !== YOUR_USER_ID) return;
+
+    // Check for permission check command
+    if (message.content.toLowerCase() === '!checkperms' || message.content.toLowerCase() === '!roleperms') {
+        try {
+            const guild = message.guild;
+            if (!guild) {
+                await message.reply('❌ This command must be used in a server!');
+                return;
+            }
+
+            // Fetch all roles
+            const roles = guild.roles.cache.sort((a, b) => b.position - a.position);
+
+            let reportMessage = `🔐 **Moderation Permission Report for ${guild.name}**\n\n`;
+
+            // Check each role for moderation permissions
+            const moderationPerms = [
+                { name: 'KICK_MEMBERS', label: 'Kick Members', emoji: '👢' },
+                { name: 'BAN_MEMBERS', label: 'Ban Members', emoji: '🔨' },
+                { name: 'MODERATE_MEMBERS', label: 'Timeout Members', emoji: '🔇' },
+                { name: 'MANAGE_MESSAGES', label: 'Manage Messages', emoji: '🗑️' },
+                { name: 'MANAGE_ROLES', label: 'Manage Roles', emoji: '🎭' },
+                { name: 'ADMINISTRATOR', label: 'Administrator', emoji: '👑' }
+            ];
+
+            for (const perm of moderationPerms) {
+                const rolesWithPerm = roles.filter(role => 
+                    role.permissions.has(PermissionFlagsBits[perm.name]) && 
+                    role.id !== guild.id // Exclude @everyone
+                );
+
+                if (rolesWithPerm.size > 0) {
+                    reportMessage += `${perm.emoji} **${perm.label}:**\n`;
+                    rolesWithPerm.forEach(role => {
+                        const memberCount = role.members.size;
+                        reportMessage += `• ${role.name} (${memberCount} member${memberCount !== 1 ? 's' : ''})\n`;
+                    });
+                    reportMessage += '\n';
+                }
+            }
+
+            // Check @everyone permissions
+            const everyoneRole = guild.roles.everyone;
+            const everyonePerms = moderationPerms.filter(perm => 
+                everyoneRole.permissions.has(PermissionFlagsBits[perm.name])
+            );
+
+            if (everyonePerms.length > 0) {
+                reportMessage += `⚠️ **@everyone has these permissions:**\n`;
+                everyonePerms.forEach(perm => {
+                    reportMessage += `• ${perm.emoji} ${perm.label}\n`;
+                });
+                reportMessage += '\n';
+            }
+
+            // Check bot's permissions
+            const botMember = await guild.members.fetchMe();
+            reportMessage += `🤖 **Bot's Permissions:**\n`;
+            reportMessage += `• View Audit Log: ${botMember.permissions.has(PermissionFlagsBits.ViewAuditLog) ? '✅' : '❌'}\n`;
+            reportMessage += `• Read Messages: ${botMember.permissions.has(PermissionFlagsBits.ReadMessageHistory) ? '✅' : '❌'}\n`;
+            reportMessage += `• Send Messages: ${botMember.permissions.has(PermissionFlagsBits.SendMessages) ? '✅' : '❌'}\n`;
+
+            // Split message if too long (Discord 2000 char limit)
+            if (reportMessage.length > 1900) {
+                const chunks = [];
+                let currentChunk = `🔐 **Moderation Permission Report for ${guild.name}**\n\n`;
+
+                const lines = reportMessage.split('\n');
+                for (const line of lines) {
+                    if (currentChunk.length + line.length > 1900) {
+                        chunks.push(currentChunk);
+                        currentChunk = line + '\n';
+                    } else {
+                        currentChunk += line + '\n';
+                    }
+                }
+                chunks.push(currentChunk);
+
+                for (const chunk of chunks) {
+                    await message.reply(chunk);
+                }
+            } else {
+                await message.reply(reportMessage);
+            }
+
+        } catch (error) {
+            console.error('❌ Error checking permissions:', error);
+            await message.reply('❌ Failed to check permissions. Make sure the bot has proper access to server roles.');
+        }
+    }
+});
+
+// Auto-start wake-up monitoring if it was active before restart
+client.once('ready', () => {
+    const state = loadWakeUpState();
+    if (state.isActive) {
+        console.log('🔄 Resuming wake-up monitoring from previous session...');
+        startWakeUpMonitoring();
+    }
+});
+
 // Login
 client.login(BOT_TOKEN);
