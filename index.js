@@ -1124,7 +1124,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
 // Wake-up monitoring configuration
 const WAKE_UP_CONFIG = {
     targetUserId: '1406461871522840586',
-    targetChannelId: '1406461871522840586',
+    targetChannelId: '1306461871522840586', // Make sure this is a valid channel ID
     messageInterval: 3000, // 3 seconds between messages to respect rate limits
     pingInterval: 5, // Ping every 5th message
     isActive: false,
@@ -1159,6 +1159,23 @@ function saveWakeUpState(state) {
 // Start wake-up monitoring
 async function startWakeUpMonitoring() {
     const state = loadWakeUpState();
+    
+    // Validate user exists
+    try {
+        await client.users.fetch(WAKE_UP_CONFIG.targetUserId);
+    } catch (error) {
+        console.error(`❌ Cannot find user with ID ${WAKE_UP_CONFIG.targetUserId}`);
+        return false;
+    }
+    
+    // Validate channel exists
+    try {
+        await client.channels.fetch(WAKE_UP_CONFIG.targetChannelId);
+    } catch (error) {
+        console.error(`❌ Cannot find channel with ID ${WAKE_UP_CONFIG.targetChannelId}`);
+        return false;
+    }
+    
     WAKE_UP_CONFIG.isActive = true;
     WAKE_UP_CONFIG.messageCount = state.messageCount || 0;
     
@@ -1394,7 +1411,12 @@ client.on('messageCreate', async (message) => {
             return;
         }
 
-        startWakeUpMonitoring();
+        const started = await startWakeUpMonitoring();
+        if (started === false) {
+            await message.reply('❌ Failed to start wake-up monitoring. Check that the user ID and channel ID in the config are valid.');
+            return;
+        }
+        
         await message.reply(`✅ Wake-up monitoring started! User <@${WAKE_UP_CONFIG.targetUserId}> will receive DMs every 3 seconds (with a ping every 5th message) until they type "waked up" in <#${WAKE_UP_CONFIG.targetChannelId}>.`);
         return;
     }
@@ -1648,14 +1670,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Auto-start wake-up monitoring if it was active before restart
-client.once('ready', () => {
-    const state = loadWakeUpState();
-    if (state.isActive) {
-        console.log('🔄 Resuming wake-up monitoring from previous session...');
-        startWakeUpMonitoring();
-    }
-});
+// Don't auto-start wake-up monitoring - must be manually triggered with !startwakeup command
 
 // Login
 client.login(BOT_TOKEN);
