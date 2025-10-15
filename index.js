@@ -1124,7 +1124,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
 // Wake-up monitoring configuration
 const WAKE_UP_CONFIG = {
     targetUserId: '1406461871522840586',
-    targetChannelId: '1306461871522840586', // Make sure this is a valid channel ID
+    targetChannelId: '1426252744586690792', // Channel where user should type "waked up"
     messageInterval: 3000, // 3 seconds between messages to respect rate limits
     pingInterval: 5, // Ping every 5th message
     isActive: false,
@@ -1213,16 +1213,19 @@ async function startWakeUpMonitoring() {
             
             WAKE_UP_CONFIG.messageCount++;
             
-            let message = `⏰ Wake up! It's time to check the server!\n\nMessage #${WAKE_UP_CONFIG.messageCount}`;
+            let message = `⏰ **WAKE UP TIME!** ⏰\n\n`;
+            message += `🌅 Good morning! It's time to wake up and check the server!\n\n`;
+            message += `📨 **Wake-up Message #${WAKE_UP_CONFIG.messageCount}**\n`;
             
             // Add ping every 5th message OR if user just came online
             const justCameOnline = WAKE_UP_CONFIG.lastStatus === 'offline' && (userStatus === 'online' || userStatus === 'dnd' || userStatus === 'idle');
             
             if (WAKE_UP_CONFIG.messageCount % WAKE_UP_CONFIG.pingInterval === 0 || justCameOnline) {
-                message += `\n\n🔔 **PING! ${justCameOnline ? 'You just came online!' : `This is your ${Math.floor(WAKE_UP_CONFIG.messageCount / WAKE_UP_CONFIG.pingInterval)}th ping!`}**`;
+                message += `\n🔔 **PING! ${justCameOnline ? '🟢 You just came online!' : `This is ping #${Math.floor(WAKE_UP_CONFIG.messageCount / WAKE_UP_CONFIG.pingInterval)}!`}** 🔔\n`;
             }
             
-            message += `\n\nType "waked up" in <#${WAKE_UP_CONFIG.targetChannelId}> to stop these messages.`;
+            message += `\n✅ **To stop these messages:**\nType \`waked up\` in <#${WAKE_UP_CONFIG.targetChannelId}>\n\n`;
+            message += `💤 Still sleeping? These messages will keep coming until you wake up!`;
             
             await user.send(message);
             console.log(`✅ Sent wake-up DM #${WAKE_UP_CONFIG.messageCount} to ${user.tag} (status: ${userStatus})${WAKE_UP_CONFIG.messageCount % WAKE_UP_CONFIG.pingInterval === 0 || justCameOnline ? ' (WITH PING)' : ''}`);
