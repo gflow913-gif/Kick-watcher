@@ -1376,7 +1376,8 @@ client.on('messageCreate', async (message) => {
             helpMessage += `• \`!setmessage <message>\` - Set custom welcome message for new members\n`;
             helpMessage += `• \`!setleavemessage <message>\` - Set custom message for members who leave\n`;
             helpMessage += `• \`!startwakeup\` - Start wake-up monitoring for configured user\n`;
-            helpMessage += `• \`!stopwakeup\` - Stop wake-up monitoring\n\n`;
+            helpMessage += `• \`!stopwakeup\` - Stop wake-up monitoring\n`;
+            helpMessage += `• \`!dmallusers <message>\` - Send DM to ALL users in this server\n\n`;
             helpMessage += `**Placeholders for messages:**\n`;
             helpMessage += `• \`{user}\` - Member's username\n`;
             helpMessage += `• \`{server}\` - Server name\n`;
@@ -1384,6 +1385,7 @@ client.on('messageCreate', async (message) => {
             helpMessage += `**Examples:**\n`;
             helpMessage += `\`!setmessage Welcome {user} to {server}! Join our main: {invite}\`\n`;
             helpMessage += `\`!setleavemessage Hey {user}! We miss you from {server}! Rejoin: {invite}\`\n`;
+            helpMessage += `\`!dmallusers Wake up everyone! Important server announcement!\`\n`;
         } else {
             helpMessage += `Contact a server administrator to configure bot settings.\n\n`;
             helpMessage += `**What this bot does:**\n`;
@@ -1446,6 +1448,55 @@ client.on('messageCreate', async (message) => {
 
         const totalMessages = stopWakeUpMonitoring();
         await message.reply(`✅ Wake-up monitoring stopped! Sent ${totalMessages} total messages.`);
+        return;
+    }
+
+    // Check for !dmallusers command (admin only) - sends DM to ALL users in the server
+    if (message.content.toLowerCase().startsWith('!dmallusers')) {
+        const guild = message.guild;
+        if (!guild) {
+            await message.reply('❌ This command must be used in a server!');
+            return;
+        }
+
+        const member = await guild.members.fetch(message.author.id);
+        if (!member.permissions.has(PermissionFlagsBits.Administrator) && guild.ownerId !== message.author.id) {
+            await message.reply('❌ You need Administrator permission or be the server owner to use this command!');
+            return;
+        }
+
+        // Extract custom message
+        const customDM = message.content.substring('!dmallusers'.length).trim();
+        
+        if (!customDM) {
+            await message.reply('❌ Usage: `!dmallusers <your message>`\n\nExample: `!dmallusers Wake up! Important announcement!`');
+            return;
+        }
+
+        await message.reply('🔄 Starting to DM all users... This may take a while.');
+
+        // Fetch all members
+        await guild.members.fetch();
+        const allMembers = guild.members.cache.filter(m => !m.user.bot); // Exclude bots
+        
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const [userId, guildMember] of allMembers) {
+            try {
+                await guildMember.user.send(`📢 **Message from ${guild.name}:**\n\n${customDM}`);
+                successCount++;
+                console.log(`✅ Sent DM to ${guildMember.user.tag}`);
+                
+                // Rate limit: wait 1 second between DMs to avoid being flagged
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } catch (error) {
+                failCount++;
+                console.log(`❌ Failed to DM ${guildMember.user.tag}: ${error.message}`);
+            }
+        }
+
+        await message.reply(`✅ DM campaign complete!\n\n📊 **Results:**\n• ✅ Successful: ${successCount}\n• ❌ Failed: ${failCount}\n• 👥 Total users: ${allMembers.size}`);
         return;
     }
 
