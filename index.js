@@ -1123,7 +1123,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
 // Wake-up monitoring configuration
 const WAKE_UP_CONFIG = {
-    targetUserId: '1406461871522840586',
+    targetUserId: 'REPLACE_WITH_USER_ID', // ⚠️ REPLACE THIS with the actual Discord user ID of the person to wake up
     targetChannelId: '1426252744586690792', // Channel where user should type "waked up"
     messageInterval: 3000, // 3 seconds between messages to respect rate limits
     pingInterval: 5, // Ping every 5th message
